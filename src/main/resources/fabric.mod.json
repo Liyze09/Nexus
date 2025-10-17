@@ -1,0 +1,37 @@
+{
+	"schemaVersion": 1,
+	"id": "nexus",
+	"version": "${version}",
+	"name": "Nexus Render",
+	"description": "",
+	"authors": [
+		"Liyze09"
+	],
+	"contact": {
+
+	},
+	"license": "Apache Licence 2.0",
+	"icon": "assets/nexus/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"client": [
+			"io.github.liyze09.nexus.NexusClientMain"
+		]
+	},
+	"mixins": [
+		"nexus.mixins.json",
+		{
+			"config": "nexus.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.17.2",
+		"minecraft": "~1.21.10",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+
+	}
+}
