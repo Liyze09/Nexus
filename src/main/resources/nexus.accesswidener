@@ -1,0 +1,3 @@
+accessWidener v2 named
+mutable field net/minecraft/client/Minecraft levelRenderer Lnet/minecraft/client/renderer/LevelRenderer;
+accessible field net/minecraft/client/Minecraft renderBuffers Lnet/minecraft/client/renderer/RenderBuffers;

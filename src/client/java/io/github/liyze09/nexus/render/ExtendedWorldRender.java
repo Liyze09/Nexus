@@ -1,0 +1,273 @@
+package io.github.liyze09.nexus.render;
+
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.framegraph.FrameGraphBuilder;
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
+import io.github.liyze09.nexus.NexusClientMain;
+import io.github.liyze09.nexus.chunk.NexusChunkBuilder;
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import net.minecraft.client.Camera;
+import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.CloudRenderer;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.RenderBuffers;
+import net.minecraft.client.renderer.SectionOcclusionGraph;
+import net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher;
+import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
+import net.minecraft.client.renderer.culling.Frustum;
+import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
+import net.minecraft.client.renderer.state.LevelRenderState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.state.BlockState;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
+
+public final class ExtendedWorldRender extends LevelRenderer {
+    @Nullable
+    private ClientLevel world = null;
+    private Minecraft minecraft;
+    private ExternalImageRender render = new ExternalImageRender();
+    private volatile boolean isCompleted = true;
+    private final long nativeContext;
+    private int width;
+    private int height;
+    private final NexusChunkBuilder builder = new NexusChunkBuilder();
+    private volatile boolean isClosed = false;
+    public ExtendedWorldRender(Minecraft minecraft, EntityRenderDispatcher entityRenderDispatcher, BlockEntityRenderDispatcher blockEntityRenderDispatcher, RenderBuffers renderBuffers, LevelRenderState levelRenderState, FeatureRenderDispatcher featureRenderDispatcher) {
+        super(minecraft, entityRenderDispatcher, blockEntityRenderDispatcher, renderBuffers, levelRenderState, featureRenderDispatcher);
+        this.nativeContext = NexusClientMain.initNative();
+        this.minecraft = minecraft;
+        this.width = minecraft.getWindow().getWidth();
+        this.height = minecraft.getWindow().getHeight();
+    }
+
+    @Override
+    public void close() {
+        checkIfClosed();
+        super.close();
+        isClosed = true;
+        render.cleanup();
+        NexusClientMain.close(nativeContext);
+    }
+
+    public boolean isClosed() {
+        return isClosed;
+    }
+
+    private void checkIfClosed() {
+        if (isClosed) {
+            throw new IllegalStateException("Renderer has already closed.");
+        }
+    }
+
+    @Override
+    public void onResourceManagerReload(ResourceManager resourceManager) {}
+
+    @Override
+    public void initOutline() {}
+
+    @Override
+    public void doEntityOutline() {}
+
+    @Override
+    protected boolean shouldShowEntityOutlines() {
+        return true;
+    }
+
+    @Override
+    public void setLevel(@Nullable ClientLevel clientLevel) {
+        this.world = clientLevel;
+    }
+
+    @Override
+    public void allChanged() {}
+
+    @Override
+    public void resize(int i, int j) {
+        this.width = i;
+        this.height = j;
+    }
+
+    @Override
+    public @Nullable String getSectionStatistics() {
+        return null;
+    }
+
+    @Override
+    public @Nullable SectionRenderDispatcher getSectionRenderDispatcher() {
+        return null;
+    }
+
+    @Override
+    public double getTotalSections() {
+        return 0.0;
+    }
+
+    @Override
+    public double getLastViewDistance() {
+        return -1D;
+    }
+
+    @Override
+    public int countRenderedSections() {
+        return 12;
+    }
+
+    @Override
+    public @Nullable String getEntityStatistics() {
+        return null;
+    }
+
+    @Override
+    public void addRecentlyCompiledSection(SectionRenderDispatcher.RenderSection _renderSection) {
+
+    }
+
+    
+
+    @Override
+    public void renderLevel(GraphicsResourceAllocator graphicsResourceAllocator, DeltaTracker deltaTracker, boolean bl, Camera camera, Matrix4f matrix4f, Matrix4f matrix4f2, Matrix4f matrix4f3, GpuBufferSlice gpuBufferSlice, Vector4f vector4f, boolean bl2) {
+        checkIfClosed();
+        var frameGraphBuilder = new FrameGraphBuilder();
+        frameGraphBuilder.addPass("main").executes(() -> {
+            long fd = NexusClientMain.render(nativeContext);
+            render.render(fd, width, height);
+        });
+        frameGraphBuilder.execute(graphicsResourceAllocator);
+    }
+
+    @Override
+    public void endFrame() {}
+
+    @Override
+    public void captureFrustum() {}
+
+    @Override
+    public void killFrustum() {
+        super.killFrustum();
+    }
+
+    @Override
+    public void tick(Camera camera) {
+
+    }
+
+    @Override
+    public void blockChanged(BlockGetter blockGetter, BlockPos blockPos, BlockState blockState, BlockState blockState2, int i) {
+
+    }
+
+    @Override
+    public void setBlocksDirty(int i, int j, int k, int l, int m, int n) {
+
+    }
+
+    @Override
+    public void setBlockDirty(BlockPos blockPos, BlockState blockState, BlockState blockState2) {
+
+    }
+
+    @Override
+    public void setSectionDirtyWithNeighbors(int i, int j, int k) {
+
+    }
+
+    @Override
+    public void setSectionRangeDirty(int i, int j, int k, int l, int m, int n) {
+
+    }
+
+    @Override
+    public void setSectionDirty(int i, int j, int k) {
+
+    }
+
+    @Override
+    public void onSectionBecomingNonEmpty(long l) {
+
+    }
+
+    @Override
+    public void destroyBlockProgress(int i, BlockPos blockPos, int j) {
+        super.destroyBlockProgress(i, blockPos, j);
+    }
+
+    @Override
+    public boolean hasRenderedAllSections() {
+        return isCompleted;
+    }
+
+    @Override
+    public void onChunkReadyToRender(ChunkPos chunkPos) {
+
+    }
+
+    @Override
+    public void needsUpdate() {
+
+    }
+
+    @Override
+    public boolean isSectionCompiled(BlockPos blockPos) {
+        return this.builder.isSectionBuilt(blockPos);
+    }
+
+    @Override
+    public @Nullable RenderTarget entityOutlineTarget() {
+        return null;
+    }
+
+    @Override
+    public @Nullable RenderTarget getTranslucentTarget() {
+        return null;
+    }
+
+    @Override
+    public @Nullable RenderTarget getItemEntityTarget() {
+        return null;
+    }
+
+    @Override
+    public @Nullable RenderTarget getParticlesTarget() {
+        return null;
+    }
+
+    @Override
+    public @Nullable RenderTarget getWeatherTarget() {
+        return null;
+    }
+
+    @Override
+    public @Nullable RenderTarget getCloudsTarget() {
+        return null;
+    }
+
+    @Override
+    public @NotNull ObjectArrayList<SectionRenderDispatcher.RenderSection> getVisibleSections() {
+        return super.getVisibleSections();
+    }
+
+    @Override
+    public @NotNull SectionOcclusionGraph getSectionOcclusionGraph() {
+        return super.getSectionOcclusionGraph();
+    }
+
+    @Override
+    public @Nullable Frustum getCapturedFrustum() {
+        return super.getCapturedFrustum();
+    }
+
+    @Override
+    public @NotNull CloudRenderer getCloudRenderer() {
+        return super.getCloudRenderer();
+    }
+}
