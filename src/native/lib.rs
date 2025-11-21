@@ -1,10 +1,10 @@
 mod backend;
 
-use jni::objects::JClass;
-use jni::sys::jlong;
-use jni::JNIEnv;
-
 use crate::backend::VkBackend;
+use jni::objects::JClass;
+use jni::sys::{jint, jlong};
+use jni::JNIEnv;
+use windows_sys::Win32::Foundation::CloseHandle;
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
@@ -47,6 +47,17 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_render<'local>(
     }
 }
 
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_cleanup<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    ctx:jlong,
+) {
+    let renderer = unsafe { load_context(ctx) };
+    renderer.destory_export_memory()
+}
+
 fn render_and_export(vk_backend: VkBackend) -> anyhow::Result<isize> {
     let (_, mem) = vk_backend.render()?;
     vk_backend.export(mem)
@@ -62,6 +73,19 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_close<'local>(
     unsafe {
         drop(Box::from_raw(ctx as *mut VkBackend));
     }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_resize<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    ctx: jlong,
+    width: jint,
+    height: jint,
+) {
+    let renderer = unsafe { load_context(ctx) };
+    renderer.resize((width as u32, height as u32));
 }
 
 unsafe fn load_context(addr: i64) -> VkBackend {

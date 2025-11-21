@@ -1,7 +1,6 @@
 package io.github.liyze09.nexus.render;
 
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
-import com.mojang.blaze3d.framegraph.FrameGraphBuilder;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import io.github.liyze09.nexus.NexusClientMain;
@@ -30,8 +29,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public final class ExtendedWorldRender extends LevelRenderer {
+public final class NexusWorldRender extends LevelRenderer {
+    private static final Logger LOGGER = LoggerFactory.getLogger(NexusWorldRender.class);
     @Nullable
     private ClientLevel world = null;
     private Minecraft minecraft;
@@ -42,12 +44,14 @@ public final class ExtendedWorldRender extends LevelRenderer {
     private int height;
     private final NexusChunkBuilder builder = new NexusChunkBuilder();
     private volatile boolean isClosed = false;
-    public ExtendedWorldRender(Minecraft minecraft, EntityRenderDispatcher entityRenderDispatcher, BlockEntityRenderDispatcher blockEntityRenderDispatcher, RenderBuffers renderBuffers, LevelRenderState levelRenderState, FeatureRenderDispatcher featureRenderDispatcher) {
+    public NexusWorldRender(Minecraft minecraft, EntityRenderDispatcher entityRenderDispatcher, BlockEntityRenderDispatcher blockEntityRenderDispatcher, RenderBuffers renderBuffers, LevelRenderState levelRenderState, FeatureRenderDispatcher featureRenderDispatcher) {
         super(minecraft, entityRenderDispatcher, blockEntityRenderDispatcher, renderBuffers, levelRenderState, featureRenderDispatcher);
         this.nativeContext = NexusClientMain.initNative();
         this.minecraft = minecraft;
         this.width = minecraft.getWindow().getWidth();
         this.height = minecraft.getWindow().getHeight();
+        NexusClientMain.resize(nativeContext, width, height);
+        LOGGER.info("NexusWorldRender created.");
     }
 
     @Override
@@ -95,6 +99,7 @@ public final class ExtendedWorldRender extends LevelRenderer {
     public void resize(int i, int j) {
         this.width = i;
         this.height = j;
+        NexusClientMain.resize(nativeContext, width, height);
     }
 
     @Override
@@ -137,12 +142,13 @@ public final class ExtendedWorldRender extends LevelRenderer {
     @Override
     public void renderLevel(GraphicsResourceAllocator graphicsResourceAllocator, DeltaTracker deltaTracker, boolean bl, Camera camera, Matrix4f matrix4f, Matrix4f matrix4f2, Matrix4f matrix4f3, GpuBufferSlice gpuBufferSlice, Vector4f vector4f, boolean bl2) {
         checkIfClosed();
-        var frameGraphBuilder = new FrameGraphBuilder();
-        frameGraphBuilder.addPass("main").executes(() -> {
-            long fd = NexusClientMain.render(nativeContext);
-            render.render(fd, width, height);
-        });
-        frameGraphBuilder.execute(graphicsResourceAllocator);
+        this.isCompleted = false;
+        long fd = NexusClientMain.render(nativeContext);
+
+        render.render(fd, width, height);
+        this.isCompleted = true;
+
+        NexusClientMain.cleanup(nativeContext);
     }
 
     @Override

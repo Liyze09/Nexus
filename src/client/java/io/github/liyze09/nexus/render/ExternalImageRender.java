@@ -12,7 +12,6 @@ import org.lwjgl.system.MemoryUtil;
 
 public class ExternalImageRender {
     private int shaderProgram, quadVAO, quadVBO;
-    private int currentTextureId = 0;
     private boolean initialized = false;
     
     private void initialize() {
@@ -25,9 +24,8 @@ public class ExternalImageRender {
     
     public void render(long handle, int width, int height) {
         initialize();
-
-        int textureId = importVulkanTexture(handle, width, height);
-
+        var int2 = importVulkanTexture(handle, width, height);
+        int textureId = int2.x;
         glDisable(GL_DEPTH_TEST);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -46,21 +44,18 @@ public class ExternalImageRender {
 
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        currentTextureId = textureId;
+        glDeleteTextures(textureId);
+        glDeleteMemoryObjectsEXT(int2.y);
     }
     
-    private int importVulkanTexture(long handle, int width, int height) {
-        if (currentTextureId != 0) {
-            glDeleteTextures(currentTextureId);
-        }
-        
+    private Int2 importVulkanTexture(long handle, int width, int height) {
         int texture = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, texture);
-        
+        int memObj = 0;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer memoryObject = stack.mallocInt(1);
             glCreateMemoryObjectsEXT(memoryObject);
-            int memObj = memoryObject.get(0);
+            memObj = memoryObject.get(0);
             
             glImportMemoryWin32HandleEXT(
                 memObj, 
@@ -84,28 +79,31 @@ public class ExternalImageRender {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         }
-        
         glBindTexture(GL_TEXTURE_2D, 0);
-        return texture;
+        return new Int2(texture, memObj);
     }
+
+    private record Int2(int x, int y) {}
     
     private void initShaders() {
-        String vertexShaderSource = "#version 330 core\n" +
-            "layout (location = 0) in vec2 aPos;\n" +
-            "layout (location = 1) in vec2 aTexCoord;\n" +
-            "out vec2 TexCoord;\n" +
-            "void main() {\n" +
-            "    gl_Position = vec4(aPos, 0.0, 1.0);\n" +
-            "    TexCoord = aTexCoord;\n" +
-            "}";
+        String vertexShaderSource = """
+                #version 330 core
+                layout (location = 0) in vec2 aPos;
+                layout (location = 1) in vec2 aTexCoord;
+                out vec2 TexCoord;
+                void main() {
+                    gl_Position = vec4(aPos, 0.0, 1.0);
+                    TexCoord = aTexCoord;
+                }""";
         
-        String fragmentShaderSource = "#version 330 core\n" +
-            "out vec4 FragColor;\n" +
-            "in vec2 TexCoord;\n" +
-            "uniform sampler2D screenTexture;\n" +
-            "void main() {\n" +
-            "    FragColor = texture(screenTexture, TexCoord);\n" +
-            "}";
+        String fragmentShaderSource = """
+                #version 330 core
+                out vec4 FragColor;
+                in vec2 TexCoord;
+                uniform sampler2D screenTexture;
+                void main() {
+                    FragColor = texture(screenTexture, TexCoord);
+                }""";
         int vertexShader = compileShader(GL_VERTEX_SHADER, vertexShaderSource);
         int fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource);
 
@@ -176,11 +174,6 @@ public class ExternalImageRender {
     }
     
     public void cleanup() {
-        if (currentTextureId != 0) {
-            glDeleteTextures(currentTextureId);
-            currentTextureId = 0;
-        }
-        
         if (shaderProgram != 0) {
             glDeleteProgram(shaderProgram);
             shaderProgram = 0;
