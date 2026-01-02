@@ -1,194 +1,272 @@
 package io.github.liyze09.nexus.render;
-
+import org.lwjgl.system.MemoryStack;
+import static org.lwjgl.opengl.GL30C.*;
+import java.io.Closeable;
 import static org.lwjgl.opengl.EXTMemoryObject.*;
 import static org.lwjgl.opengl.EXTMemoryObjectWin32.*;
-import static org.lwjgl.opengl.GL30.*;
+import static org.lwjgl.opengl.EXTSemaphore.*;
+import static org.lwjgl.opengl.EXTSemaphoreWin32.*;
+import static org.lwjgl.opengl.EXTSemaphoreWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT;
+import static org.lwjgl.opengl.GL11C.GL_COLOR_BUFFER_BIT;
+import static org.lwjgl.opengl.GL11C.GL_DEPTH_BUFFER_BIT;
+import static org.lwjgl.opengl.GL11C.GL_FALSE;
+import static org.lwjgl.opengl.GL11C.GL_LINEAR;
+import static org.lwjgl.opengl.GL11C.GL_RGBA8;
+import static org.lwjgl.opengl.GL11C.GL_TEXTURE_2D;
+import static org.lwjgl.opengl.GL11C.GL_TEXTURE_MAG_FILTER;
+import static org.lwjgl.opengl.GL11C.GL_TEXTURE_MIN_FILTER;
+import static org.lwjgl.opengl.GL11C.GL_TEXTURE_WRAP_S;
+import static org.lwjgl.opengl.GL11C.GL_TEXTURE_WRAP_T;
+import static org.lwjgl.opengl.GL11C.GL_TRIANGLE_STRIP;
+import static org.lwjgl.opengl.GL11C.GL_TRUE;
+import static org.lwjgl.opengl.GL11C.glBindTexture;
+import static org.lwjgl.opengl.GL11C.glClear;
+import static org.lwjgl.opengl.GL11C.glClearColor;
+import static org.lwjgl.opengl.GL11C.glDeleteTextures;
+import static org.lwjgl.opengl.GL11C.glDrawArrays;
+import static org.lwjgl.opengl.GL11C.glFlush;
+import static org.lwjgl.opengl.GL11C.glGenTextures;
+import static org.lwjgl.opengl.GL11C.glTexParameteri;
+import static org.lwjgl.opengl.GL11C.glViewport;
+import static org.lwjgl.opengl.GL12C.GL_CLAMP_TO_EDGE;
+import static org.lwjgl.opengl.GL13C.GL_TEXTURE0;
+import static org.lwjgl.opengl.GL13C.glActiveTexture;
+import static org.lwjgl.opengl.GL20C.GL_COMPILE_STATUS;
+import static org.lwjgl.opengl.GL20C.GL_FRAGMENT_SHADER;
+import static org.lwjgl.opengl.GL20C.GL_LINK_STATUS;
+import static org.lwjgl.opengl.GL20C.GL_VERTEX_SHADER;
+import static org.lwjgl.opengl.GL20C.glAttachShader;
+import static org.lwjgl.opengl.GL20C.glCompileShader;
+import static org.lwjgl.opengl.GL20C.glCreateProgram;
+import static org.lwjgl.opengl.GL20C.glCreateShader;
+import static org.lwjgl.opengl.GL20C.glDeleteProgram;
+import static org.lwjgl.opengl.GL20C.glDeleteShader;
+import static org.lwjgl.opengl.GL20C.glGetProgramInfoLog;
+import static org.lwjgl.opengl.GL20C.glGetProgrami;
+import static org.lwjgl.opengl.GL20C.glGetShaderInfoLog;
+import static org.lwjgl.opengl.GL20C.glGetShaderi;
+import static org.lwjgl.opengl.GL20C.glGetUniformLocation;
+import static org.lwjgl.opengl.GL20C.glLinkProgram;
+import static org.lwjgl.opengl.GL20C.glShaderSource;
+import static org.lwjgl.opengl.GL20C.glUniform1i;
+import static org.lwjgl.opengl.GL20C.glUseProgram;
 
-import java.nio.FloatBuffer;
-import java.nio.IntBuffer;
 
-import org.lwjgl.system.MemoryStack;
-import org.lwjgl.system.MemoryUtil;
-
-public class ExternalImageRender {
-    private int shaderProgram, quadVAO, quadVBO;
-    private boolean initialized = false;
+public class ExternalImageRender implements Closeable {
+    private int program;
+    private int glReadySemaphore;
+    private int glCompleteSemaphore;
+    private int memoryObject;
+    private int texture;
+    private int vao;
+    private int fbo;
+    private long externalMemory;
     
-    private void initialize() {
-        if (initialized) return;
+    private int width;
+    private int height;
+    
+    private static final String VERTEX_SHADER_SOURCE = """
+        #version 330 core
+
+        layout(location = 0) in vec2 aPosition;
+        out vec2 TexCoord;
+
+        void main() {
+            gl_Position = vec4(aPosition, 0.0, 1.0);
+            TexCoord = aPosition * 0.5 + 0.5;
+        }""";
+    
+    private static final String FRAGMENT_SHADER_SOURCE = """
+        #version 330 core
+
+        in vec2 TexCoord;
+        out vec4 FragColor;
+
+        uniform sampler2D texSampler;
+
+        void main() {
+            FragColor = texture(texSampler, TexCoord);
+        }""";
+    
+    public ExternalImageRender(long glReady, long glComplete) {
+        initialize(glReady, glComplete);
+    }
+    
+    private void initialize(long glReady, long glComplete) {
+        int vertexShader = createShader(GL_VERTEX_SHADER, VERTEX_SHADER_SOURCE);
+        int fragmentShader = createShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_SOURCE);
         
-        initShaders();
-        initQuad();
-        initialized = true;
+        program = glCreateProgram();
+        glAttachShader(program, vertexShader);
+        glAttachShader(program, fragmentShader);
+        glLinkProgram(program);
+        
+        checkProgramLinkStatus(program);
+        
+        glDeleteShader(vertexShader);
+        glDeleteShader(fragmentShader);
+        
+        int[] semaphores = new int[2];
+        glGenSemaphoresEXT(semaphores);
+        glReadySemaphore = semaphores[0];
+        glCompleteSemaphore = semaphores[1];
+        
+        int handleType = getPlatformHandleType();
+        glImportSemaphoreWin32HandleEXT(glReadySemaphore, handleType, glReady);
+        glImportSemaphoreWin32HandleEXT(glCompleteSemaphore, handleType, glComplete);
+        
+        vao = glGenVertexArrays();
+        glBindVertexArray(vao);
+
+        fbo = glGenFramebuffers();
+        glViewport(0, 0, width, height);
     }
     
-    public void render(long handle, int width, int height) {
-        initialize();
-        var int2 = importVulkanTexture(handle, width, height);
-        int textureId = int2.x;
-        glDisable(GL_DEPTH_TEST);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        glUseProgram(shaderProgram);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, textureId);
-
-        int textureLocation = glGetUniformLocation(shaderProgram, "screenTexture");
-        glUniform1i(textureLocation, 0);
-
-        glBindVertexArray(quadVAO);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-        glBindVertexArray(0);
-
-        glBindTexture(GL_TEXTURE_2D, 0);
-
-        glDeleteTextures(textureId);
-        glDeleteMemoryObjectsEXT(int2.y);
-    }
-    
-    private Int2 importVulkanTexture(long handle, int width, int height) {
-        int texture = glGenTextures();
-        glBindTexture(GL_TEXTURE_2D, texture);
-        int memObj = 0;
+    public void refresh(long externalMemory, int width, int height) {
+        if (externalMemory == this.externalMemory && width == this.width && height == this.height) {
+            return;
+        }
+        this.width = width;
+        this.height = height;
+        
+        if (texture != 0) {
+            glDeleteTextures(texture);
+        }
+        
+        if (memoryObject != 0) {
+            glDeleteMemoryObjectsEXT(memoryObject);
+        }
+        
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            IntBuffer memoryObject = stack.mallocInt(1);
-            glCreateMemoryObjectsEXT(memoryObject);
-            memObj = memoryObject.get(0);
+            int[] memoryObjects = new int[1];
+            glCreateMemoryObjectsEXT(memoryObjects);
+            memoryObject = memoryObjects[0];
             
-            glImportMemoryWin32HandleEXT(
-                memObj, 
-                (long) width * height * 4,
-                GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, 
-                handle
-            );
+            int dedicated = GL_TRUE;
+            glMemoryObjectParameterivEXT(memoryObject, 
+                GL_DEDICATED_MEMORY_OBJECT_EXT, 
+                stack.ints(dedicated));
             
-            glTexStorageMem2DEXT(
-                GL_TEXTURE_2D,
-                1,
-                GL_RGBA8,
-                width,
-                height,
-                memObj,
-                0
-            );
-
+            int handleType = getPlatformHandleType();
+            long allocationSize = width * height * 4L;
+            glImportMemoryWin32HandleEXT(memoryObject, allocationSize, handleType, externalMemory);
+            
+            texture = glGenTextures();
+            glBindTexture(GL_TEXTURE_2D, texture);
+            
+            glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, GL_RGBA8, width, height, 
+                memoryObject, 0);
+            
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            
+            glBindTexture(GL_TEXTURE_2D, 0);
+            
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, 
+                GL_TEXTURE_2D, texture, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
         }
+        
+        glViewport(0, 0, width, height);
+    }
+    
+    public void render() {
+        waitForVulkanSemaphore();
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        
+        glUseProgram(program);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glUniform1i(glGetUniformLocation(program, "texSampler"), 0);
+
+        glBindVertexArray(vao);
+        
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        glBindVertexArray(0);
+        glUseProgram(0);
         glBindTexture(GL_TEXTURE_2D, 0);
-        return new Int2(texture, memObj);
-    }
-
-    private record Int2(int x, int y) {}
-    
-    private void initShaders() {
-        String vertexShaderSource = """
-                #version 330 core
-                layout (location = 0) in vec2 aPos;
-                layout (location = 1) in vec2 aTexCoord;
-                out vec2 TexCoord;
-                void main() {
-                    gl_Position = vec4(aPos, 0.0, 1.0);
-                    TexCoord = aTexCoord;
-                }""";
         
-        String fragmentShaderSource = """
-                #version 330 core
-                out vec4 FragColor;
-                in vec2 TexCoord;
-                uniform sampler2D screenTexture;
-                void main() {
-                    FragColor = texture(screenTexture, TexCoord);
-                }""";
-        int vertexShader = compileShader(GL_VERTEX_SHADER, vertexShaderSource);
-        int fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource);
-
-        shaderProgram = glCreateProgram();
-        glAttachShader(shaderProgram, vertexShader);
-        glAttachShader(shaderProgram, fragmentShader);
-        glLinkProgram(shaderProgram);
-
-        checkShaderProgramLinkStatus(shaderProgram);
-        
-        glDeleteShader(vertexShader);
-        glDeleteShader(fragmentShader);
+        signalVulkanSemaphore();
+        glFlush();
     }
     
-    private int compileShader(int type, String source) {
+    private void waitForVulkanSemaphore() {
+        int srcLayout = GL_LAYOUT_COLOR_ATTACHMENT_EXT;
+        int[] textures = {texture};
+        int[] srcLayouts = {srcLayout};
+        
+        glWaitSemaphoreEXT(glReadySemaphore, emptyIntList, textures, srcLayouts);
+    }
+    
+    private void signalVulkanSemaphore() {
+        int dstLayout = GL_LAYOUT_SHADER_READ_ONLY_EXT;
+        int[] textures = {texture};
+        int[] dstLayouts = {dstLayout};
+        
+        glSignalSemaphoreEXT(glCompleteSemaphore, emptyIntList, textures, dstLayouts);
+    }
+    
+    private int createShader(int type, String source) {
         int shader = glCreateShader(type);
         glShaderSource(shader, source);
         glCompileShader(shader);
-        checkShaderCompileStatus(shader, type);
+        
+        if (glGetShaderi(shader, GL_COMPILE_STATUS) == GL_FALSE) {
+            glDeleteShader(shader);
+            throw new RuntimeException("Shader compilation failed: " + glGetShaderInfoLog(shader));
+        }
+        
         return shader;
     }
     
-    private void checkShaderCompileStatus(int shader, int type) {
-        int success = glGetShaderi(shader, GL_COMPILE_STATUS);
-        if (success == GL_FALSE) {
-            String infoLog = glGetShaderInfoLog(shader);
-            String shaderType = (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
-            throw new RuntimeException("Nexus OpenGL " + shaderType + " shader compilation failed: " + infoLog);
+    private void checkProgramLinkStatus(int program) {
+        if (glGetProgrami(program, GL_LINK_STATUS) == GL_FALSE) {
+            throw new RuntimeException("Program linking failed: " + glGetProgramInfoLog(program));
         }
     }
     
-    private void checkShaderProgramLinkStatus(int program) {
-        int success = glGetProgrami(program, GL_LINK_STATUS);
-        if (success == GL_FALSE) {
-            String infoLog = glGetProgramInfoLog(program);
-            throw new RuntimeException("Nexus OpenGL shader program linking failed: " + infoLog);
-        }
+    private int getPlatformHandleType() {
+        return GL_HANDLE_TYPE_OPAQUE_WIN32_EXT;
     }
     
-    private void initQuad() {
-        float[] quadVertices = {
-            -1.0f,  1.0f, 0.0f, 1.0f,
-            -1.0f, -1.0f, 0.0f, 0.0f,
-             1.0f, -1.0f, 1.0f, 0.0f, 
-            
-            -1.0f,  1.0f, 0.0f, 1.0f,
-             1.0f, -1.0f, 1.0f, 0.0f,
-             1.0f,  1.0f, 1.0f, 1.0f
-        };
-        quadVAO = glGenVertexArrays();
-        quadVBO = glGenBuffers();
+    @Override
+    public void close() {
+        if (program != 0) {
+            glDeleteProgram(program);
+        }
         
-        glBindVertexArray(quadVAO);
-        glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+        if (texture != 0) {
+            glDeleteTextures(texture);
+        }
         
-        FloatBuffer vertexBuffer = MemoryUtil.memAllocFloat(quadVertices.length);
-        vertexBuffer.put(quadVertices).flip();
-        glBufferData(GL_ARRAY_BUFFER, vertexBuffer, GL_STATIC_DRAW);
-        MemoryUtil.memFree(vertexBuffer);
-
-        glVertexAttribPointer(0, 2, GL_FLOAT, false, 4 * Float.BYTES, 0L);
-        glEnableVertexAttribArray(0);
-
-        glVertexAttribPointer(1, 2, GL_FLOAT, false, 4 * Float.BYTES, 2L * Float.BYTES);
-        glEnableVertexAttribArray(1);
+        if (memoryObject != 0) {
+            glDeleteMemoryObjectsEXT(memoryObject);
+        }
         
-        glBindVertexArray(0);
+        if (glReadySemaphore != 0) {
+            glDeleteSemaphoresEXT(glReadySemaphore);
+        }
+        
+        if (glCompleteSemaphore != 0) {
+            glDeleteSemaphoresEXT(glCompleteSemaphore);
+        }
+        
+        if (vao != 0) {
+            glDeleteVertexArrays(vao);
+        }
+        
+        if (fbo != 0) {
+            glDeleteFramebuffers(fbo);
+        }
     }
-    
-    public void cleanup() {
-        if (shaderProgram != 0) {
-            glDeleteProgram(shaderProgram);
-            shaderProgram = 0;
-        }
-        
-        if (quadVAO != 0) {
-            glDeleteVertexArrays(quadVAO);
-            quadVAO = 0;
-        }
-        
-        if (quadVBO != 0) {
-            glDeleteBuffers(quadVBO);
-            quadVBO = 0;
-        }
-        
-        initialized = false;
-    }
+    private int[] emptyIntList = new int[0];
 }

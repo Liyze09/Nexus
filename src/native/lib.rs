@@ -1,10 +1,11 @@
-mod backend;
+pub mod backend;
+pub mod shader;
 
+use std::sync::Arc;
 use crate::backend::VkBackend;
 use jni::objects::JClass;
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
-use windows_sys::Win32::Foundation::CloseHandle;
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
@@ -23,19 +24,28 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_initNative<'loca
             return -1;
         }
     };
-    Box::into_raw(Box::from(context)) as usize as u64 as i64
+    Box::into_raw(Box::from(Arc::new(context))) as usize as u64 as i64
 }
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_render<'local>(
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_refresh<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     ctx: jlong,
 ) -> jlong {
     let renderer = unsafe { load_context(ctx) };
-    match render_and_export(renderer) {
-        Ok(handle) => handle as i64 as jlong,
+    renderer.state().handle_error(
+        |e| {
+            env.throw_new(
+                String::from("io/github/liyze09/nexus/exception/VulkanException"),
+                e.to_string(),
+            )
+                .unwrap();
+        }
+    );
+    match renderer.target().get_value() {
+        Ok(target) => target.handle as i64 as jlong,
         Err(err) => {
             env.throw_new(
                 String::from("io/github/liyze09/nexus/exception/VulkanException"),
@@ -49,18 +59,24 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_render<'local>(
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_cleanup<'local>(
+extern "system" fn  Java_io_github_liyze09_nexus_NexusClientMain_getGLReady<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
-    ctx:jlong,
-) {
+    ctx: jlong,
+) -> jlong {
     let renderer = unsafe { load_context(ctx) };
-    renderer.destory_export_memory()
+    renderer.semaphore().handle_gl_ready as i64 as jlong
 }
 
-fn render_and_export(vk_backend: VkBackend) -> anyhow::Result<isize> {
-    let (_, mem) = vk_backend.render()?;
-    vk_backend.export(mem)
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+extern "system" fn  Java_io_github_liyze09_nexus_NexusClientMain_getGLComplete<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    ctx: jlong,
+) -> jlong {
+    let renderer = unsafe { load_context(ctx) };
+    renderer.semaphore().handle_gl_complete as i64 as jlong
 }
 
 #[allow(non_snake_case)]
@@ -78,7 +94,7 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_close<'local>(
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
 extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_resize<'local>(
-    _env: JNIEnv<'local>,
+    mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     ctx: jlong,
     width: jint,
@@ -86,11 +102,46 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_resize<'local>(
 ) {
     let renderer = unsafe { load_context(ctx) };
     renderer.resize((width as u32, height as u32));
+    match renderer.update() {
+        Ok(_) => {},
+        Err(err) => {
+            env.throw_new(
+                String::from("io/github/liyze09/nexus/exception/VulkanException"),
+                err.to_string(),
+            )
+                .unwrap();
+        }
+    }
+
 }
 
-unsafe fn load_context(addr: i64) -> VkBackend {
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_startRendering<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    ctx: jlong
+) {
+
+    let renderer = unsafe { load_context(ctx) };
+    renderer.start_rendering_thread();
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_endRendering<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    ctx: jlong
+) {
+
+    let renderer = unsafe { load_context(ctx) };
+    renderer.end_rendering_thread();
+}
+
+unsafe fn load_context(addr: i64) -> Arc<VkBackend> {
     unsafe {
-        let ptr = addr as *mut VkBackend;
+        let ptr = addr as *mut Arc<VkBackend>;
         (*ptr).clone()
     }
 }

@@ -2,7 +2,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 plugins {
-	id 'fabric-loom' version "${loom_version}"
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
 	id 'maven-publish'
 }
 
@@ -35,12 +35,8 @@ loom {
 }
 
 dependencies {
-	// To change the versions see the gradle.properties file
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-
-	mappings loom.layered {
-		officialMojangMappings()
-	}
+	mappings loom.officialMojangMappings()
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
@@ -54,20 +50,20 @@ processResources {
 	filesMatching("fabric.mod.json") {
 		expand "version": inputs.properties.version
 	}
-	def output = "cargo build --release".execute()
+	/*def output = "cargo build --release".execute()
 	if (output.waitFor() != 0) {
 		throw new GradleException("Failed to compile rust")
 	}
 
 	output.inputReader().lines().forEach {
 		println(it)
-	}
+	}*/
 	def target = new File("${project.projectDir}/build/resources/client/nexus.dll")
 	target.parentFile.mkdirs()
 	Files.copy(new File("${project.projectDir}/target/release/nexus.dll").toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
 }
 tasks.withType(JavaCompile).configureEach {
-	it.options.release = 21
+	it.options.release = 25
 }
 
 java {
@@ -76,8 +72,8 @@ java {
 	// If you remove this line, sources will not be generated.
 	withSourcesJar()
 
-	sourceCompatibility = JavaVersion.VERSION_21
-	targetCompatibility = JavaVersion.VERSION_21
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
 }
 
 jar {

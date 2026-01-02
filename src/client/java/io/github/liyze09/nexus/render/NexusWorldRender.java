@@ -35,14 +35,15 @@ import org.slf4j.LoggerFactory;
 public final class NexusWorldRender extends LevelRenderer {
     private static final Logger LOGGER = LoggerFactory.getLogger(NexusWorldRender.class);
     @Nullable
-    private ClientLevel world = null;
+    private volatile ClientLevel world = null;
+    @SuppressWarnings("unused")
     private Minecraft minecraft;
-    private ExternalImageRender render = new ExternalImageRender();
+    private ExternalImageRender renderer;
     private volatile boolean isCompleted = true;
     private final long nativeContext;
     private int width;
     private int height;
-    private final NexusChunkBuilder builder = new NexusChunkBuilder();
+    public volatile NexusChunkBuilder builder = null;
     private volatile boolean isClosed = false;
     public NexusWorldRender(Minecraft minecraft, EntityRenderDispatcher entityRenderDispatcher, BlockEntityRenderDispatcher blockEntityRenderDispatcher, RenderBuffers renderBuffers, LevelRenderState levelRenderState, FeatureRenderDispatcher featureRenderDispatcher) {
         super(minecraft, entityRenderDispatcher, blockEntityRenderDispatcher, renderBuffers, levelRenderState, featureRenderDispatcher);
@@ -51,6 +52,9 @@ public final class NexusWorldRender extends LevelRenderer {
         this.width = minecraft.getWindow().getWidth();
         this.height = minecraft.getWindow().getHeight();
         NexusClientMain.resize(nativeContext, width, height);
+        long r = NexusClientMain.getGLReady(nativeContext);
+        long c = NexusClientMain.getGLComplete(nativeContext);
+        this.renderer = new ExternalImageRender(r, c);
         LOGGER.info("NexusWorldRender created.");
     }
 
@@ -58,13 +62,18 @@ public final class NexusWorldRender extends LevelRenderer {
     public void close() {
         checkIfClosed();
         super.close();
+        builder.close();
         isClosed = true;
-        render.cleanup();
+        renderer.close();
         NexusClientMain.close(nativeContext);
     }
 
     public boolean isClosed() {
         return isClosed;
+    }
+    @Nullable
+    public ClientLevel getWorld() {
+        return world;
     }
 
     private void checkIfClosed() {
@@ -90,6 +99,12 @@ public final class NexusWorldRender extends LevelRenderer {
     @Override
     public void setLevel(@Nullable ClientLevel clientLevel) {
         this.world = clientLevel;
+        if (clientLevel != null) {
+            this.builder = new NexusChunkBuilder(clientLevel);
+        } else {
+            this.builder = null;
+        }
+
     }
 
     @Override
@@ -143,12 +158,10 @@ public final class NexusWorldRender extends LevelRenderer {
     public void renderLevel(GraphicsResourceAllocator graphicsResourceAllocator, DeltaTracker deltaTracker, boolean bl, Camera camera, Matrix4f matrix4f, Matrix4f matrix4f2, Matrix4f matrix4f3, GpuBufferSlice gpuBufferSlice, Vector4f vector4f, boolean bl2) {
         checkIfClosed();
         this.isCompleted = false;
-        long fd = NexusClientMain.render(nativeContext);
-
-        render.render(fd, width, height);
+        long t = NexusClientMain.refresh(nativeContext);
+        renderer.refresh(t, width, height);
+        renderer.render();
         this.isCompleted = true;
-
-        NexusClientMain.cleanup(nativeContext);
     }
 
     @Override
@@ -220,11 +233,6 @@ public final class NexusWorldRender extends LevelRenderer {
     @Override
     public void needsUpdate() {
 
-    }
-
-    @Override
-    public boolean isSectionCompiled(BlockPos blockPos) {
-        return this.builder.isSectionBuilt(blockPos);
     }
 
     @Override
