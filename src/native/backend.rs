@@ -6,6 +6,7 @@ use dashmap::DashMap;
 use rayon::prelude::*;
 use smallvec::smallvec;
 use vulkano::acceleration_structure::AccelerationStructure;
+use vulkano::buffer::Subbuffer;
 use vulkano::pipeline::PipelineLayout;
 use vulkano::pipeline::layout::PipelineLayoutCreateInfo;
 use vulkano::pipeline::ray_tracing::{RayTracingPipeline, RayTracingPipelineCreateInfo};
@@ -29,6 +30,8 @@ use vulkano::sync::semaphore::{ExternalSemaphoreHandleType, ExternalSemaphoreHan
 use vulkano::{NonExhaustive, Version, VulkanLibrary, VulkanObject};
 use windows_sys::Win32::Foundation::CloseHandle;
 
+use crate::geometry::{GeometryType, GeometryManager};
+
 #[derive(Clone)]
 pub struct VkBackend {
     raw: Raw,
@@ -40,8 +43,7 @@ pub struct VkBackend {
     render_target: RenderTargetWrapper,
     semaphore: SharedSemaphore,
     state: Arc<RenderState>,
-    blas: DashMap<u64, Arc<AccelerationStructure>>,
-    temp_geometry: DashMap<u64, Arc<(Vec<u8>, GeometryType)>>
+    geometry_manager: Arc<GeometryManager>
 }
 
 impl VkBackend {
@@ -94,12 +96,11 @@ impl VkBackend {
                     #[cfg(windows)] khr_external_memory_win32: true,
                     #[cfg(windows)] khr_external_semaphore_win32: true,
                     #[cfg(unix)] khr_external_memory_fd: true,
-                    #[cfg(unix)] khr_external_semaphore_fd_fd: true,
+                    #[cfg(unix)] khr_external_semaphore_fd: true,
                     khr_acceleration_structure: device_properties.ray_trace,
                     khr_ray_tracing_pipeline: device_properties.ray_trace,
                     khr_ray_query: device_properties.ray_trace,
                     khr_deferred_host_operations: device_properties.ray_trace,
-                    ext_mesh_shader: true,
                     ..Default::default()
                 },
                 enabled_features: DeviceFeatures {
@@ -150,7 +151,7 @@ impl VkBackend {
         Ok(VkBackend {
             raw,
             queue,
-            memory_allocator,
+            memory_allocator: memory_allocator.clone(),
             command_buffer_allocator,
             size: Arc::new(RwLock::new((0, 0))),
             memory_type_index,
@@ -162,8 +163,7 @@ impl VkBackend {
                 gl_complete: Arc::new(gl_complete),
             },
             state: Arc::new(RenderState::default()),
-            blas: DashMap::new(),
-            temp_geometry: DashMap::new()
+            geometry_manager: Arc::new(GeometryManager::new(memory_allocator))
         })
     }
 
@@ -179,12 +179,6 @@ impl VkBackend {
                         this.state.set_error(e);
                         break;
                     };
-                    self.temp_geometry.par_iter().for_each(|entry| {
-                        let (id, geometry) = (&*entry.key(), &*entry.value());
-                        // Upload the geometry data and use subbuffer to create
-                        
-                    });
-                    self.temp_geometry.clear();
             }
         });
     }
@@ -232,10 +226,8 @@ impl VkBackend {
         Ok(fence)
     }
 
-    pub fn build_acceleration_structure(&self, buffer: Vec<u8>, geometry_type: GeometryType) -> Result<()> {
-        let id = rand::random::<u64>();
-        self.temp_geometry.insert(id, Arc::new((buffer, geometry_type)));
-        Ok(())
+    pub fn build_acceleration_structure(&self, buffer: Vec<u8>, geometry_type: GeometryType) -> u64 {
+        self.geometry_manager.add_temporary_geometry(buffer, geometry_type)
     }
 
     #[inline]
@@ -304,6 +296,16 @@ impl VkBackend {
     }
 
     #[inline]
+    pub fn memory_allocator(&self) -> Arc<StandardMemoryAllocator> {
+        self.memory_allocator.clone()
+    }
+
+    #[inline]
+    pub fn command_buffer_allocator(&self) -> Arc<StandardCommandBufferAllocator> {
+        self.command_buffer_allocator.clone()
+    }
+
+    #[inline]
     pub fn device(&self) -> Arc<Device> {
         self.queue.device().clone()
     }
@@ -331,14 +333,16 @@ fn check_physical_device(physical_device: Arc<PhysicalDevice>) -> DeviceProperti
     if physical_device.api_version() >= Version::V1_4 {
         score += 1;
     }
-    if physical_device.supported_features().ray_tracing_pipeline {
+    if physical_device.supported_features().ray_tracing_pipeline
+    || !physical_device.supported_extensions().khr_deferred_host_operations
+    {
         score += 1;
         ray_trace = true;
     }
     if physical_device.api_version() < Version::V1_3
-    || !physical_device.supported_features().dynamic_rendering
     || !physical_device.supported_extensions().khr_external_memory
-    || !physical_device.supported_extensions().ext_mesh_shader {
+    || !physical_device.supported_features().dynamic_rendering
+    {
         graphics = false;
     }
     DeviceProperties {
@@ -482,12 +486,4 @@ pub struct DeviceProperties {
     score: u32,
 }
 
-pub enum GeometryType {
-    Triangles,
-    AABBs,
-}
 
-pub enum AccelerationStructureCache {
-    Temporary((Vec<u8>, GeometryType)),
-    Built(Arc<AccelerationStructure>),
-}

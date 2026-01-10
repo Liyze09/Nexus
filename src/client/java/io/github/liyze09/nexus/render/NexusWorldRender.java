@@ -29,6 +29,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -83,7 +84,7 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public void onResourceManagerReload(ResourceManager resourceManager) {}
+    public void onResourceManagerReload(@NonNull ResourceManager resourceManager) {}
 
     @Override
     public void initOutline() {}
@@ -93,7 +94,7 @@ public final class NexusWorldRender extends LevelRenderer {
 
     @Override
     protected boolean shouldShowEntityOutlines() {
-        return true;
+        return false;
     }
 
     @Override
@@ -129,17 +130,17 @@ public final class NexusWorldRender extends LevelRenderer {
 
     @Override
     public double getTotalSections() {
-        return 0.0;
+        return 0;
     }
 
     @Override
     public double getLastViewDistance() {
-        return -1D;
+        return 0;
     }
 
     @Override
     public int countRenderedSections() {
-        return 12;
+        return 0;
     }
 
     @Override
@@ -148,14 +149,10 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public void addRecentlyCompiledSection(SectionRenderDispatcher.RenderSection _renderSection) {
-
-    }
-
-    
+    public void addRecentlyCompiledSection(SectionRenderDispatcher.RenderSection renderSection) {}
 
     @Override
-    public void renderLevel(GraphicsResourceAllocator graphicsResourceAllocator, DeltaTracker deltaTracker, boolean bl, Camera camera, Matrix4f matrix4f, Matrix4f matrix4f2, Matrix4f matrix4f3, GpuBufferSlice gpuBufferSlice, Vector4f vector4f, boolean bl2) {
+    public void renderLevel(@NonNull GraphicsResourceAllocator graphicsResourceAllocator, @NonNull DeltaTracker deltaTracker, boolean bl, Camera camera, Matrix4f matrix4f, Matrix4f matrix4f2, Matrix4f matrix4f3, GpuBufferSlice gpuBufferSlice, Vector4f vector4f, boolean bl2) {
         checkIfClosed();
         this.isCompleted = false;
         long t = NexusClientMain.refresh(nativeContext);
@@ -171,53 +168,38 @@ public final class NexusWorldRender extends LevelRenderer {
     public void captureFrustum() {}
 
     @Override
-    public void killFrustum() {
-        super.killFrustum();
-    }
+    public void killFrustum() {}
 
     @Override
-    public void tick(Camera camera) {
-
-    }
+    public void tick(Camera camera) {}
 
     @Override
-    public void blockChanged(BlockGetter blockGetter, BlockPos blockPos, BlockState blockState, BlockState blockState2, int i) {
-
-    }
+    public void blockChanged(BlockGetter blockGetter, BlockPos blockPos, BlockState blockState, BlockState blockState2, int i) {}
 
     @Override
-    public void setBlocksDirty(int i, int j, int k, int l, int m, int n) {
-
-    }
+    public void setBlocksDirty(int i, int j, int k, int l, int m, int n) {}
 
     @Override
-    public void setBlockDirty(BlockPos blockPos, BlockState blockState, BlockState blockState2) {
-
-    }
+    public void setBlockDirty(BlockPos blockPos, BlockState blockState, BlockState blockState2) {}
 
     @Override
     public void setSectionDirtyWithNeighbors(int i, int j, int k) {
-
     }
 
     @Override
     public void setSectionRangeDirty(int i, int j, int k, int l, int m, int n) {
-
     }
 
     @Override
     public void setSectionDirty(int i, int j, int k) {
-
     }
 
     @Override
     public void onSectionBecomingNonEmpty(long l) {
-
     }
 
     @Override
     public void destroyBlockProgress(int i, BlockPos blockPos, int j) {
-        super.destroyBlockProgress(i, blockPos, j);
     }
 
     @Override
@@ -227,12 +209,10 @@ public final class NexusWorldRender extends LevelRenderer {
 
     @Override
     public void onChunkReadyToRender(ChunkPos chunkPos) {
-
     }
 
     @Override
     public void needsUpdate() {
-
     }
 
     @Override

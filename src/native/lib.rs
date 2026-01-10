@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod shader;
+pub mod geometry;
 
 use std::sync::Arc;
 use crate::backend::VkBackend;

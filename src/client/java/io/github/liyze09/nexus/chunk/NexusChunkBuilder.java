@@ -5,7 +5,6 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Optional;
@@ -131,28 +130,26 @@ public class NexusChunkBuilder implements Closeable {
                         pos.getZ() & 15
                 );
                 Optional<Mesh> mesh = model.getMesh(faces, pos1);
-                if (!mesh.isEmpty()) {
-                    meshes.add(mesh.get());
-                }
+                mesh.ifPresent(meshes::add);
                 var aabb = model.getAABB(faces, pos1, NexusClientMain.config.parallax_depth);
                 aabbs.addAll(aabb);
             }
         }
         
-        if (aabbs.size() != 0) {
+        if (!aabbs.isEmpty()) {
             var layout = MemoryLayout.sequenceLayout(
-                    aabbs.size() * 6,
+                    aabbs.size() * 6L,
                     ValueLayout.JAVA_FLOAT
             );
             MemorySegment segment_aabb = arena.allocate(layout);
             for (int j = 0; j < aabbs.size(); j++) {
                 var aabb1 = aabbs.get(j);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6 + 0, (float) aabb1.minX);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6 + 1, (float) aabb1.minY);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6 + 2, (float) aabb1.minZ);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6 + 3, (float) aabb1.maxX);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6 + 4, (float) aabb1.maxY);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6 + 5, (float) aabb1.maxZ);
+                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L, (float) aabb1.minX);
+                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 1, (float) aabb1.minY);
+                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 2, (float) aabb1.minZ);
+                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 3, (float) aabb1.maxX);
+                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 4, (float) aabb1.maxY);
+                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 5, (float) aabb1.maxZ);
             }
             builtChunk.segmentAABB = segment_aabb;
         }
