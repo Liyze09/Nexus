@@ -21,6 +21,7 @@ import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
 import net.minecraft.client.renderer.state.LevelRenderState;
 import net.minecraft.core.BlockPos;
+import net.minecraft.gizmos.Gizmos;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
@@ -33,17 +34,21 @@ import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+
 public final class NexusWorldRender extends LevelRenderer {
     private static final Logger LOGGER = LoggerFactory.getLogger(NexusWorldRender.class);
     @Nullable
     private volatile ClientLevel world = null;
     @SuppressWarnings("unused")
     private Minecraft minecraft;
-    private ExternalImageRender renderer;
+    private ExternalImageRenderer renderer;
     private volatile boolean isCompleted = true;
     private final long nativeContext;
     private int width;
     private int height;
+    private boolean rendering = false;
     public volatile NexusChunkBuilder builder = null;
     private volatile boolean isClosed = false;
     public NexusWorldRender(Minecraft minecraft, EntityRenderDispatcher entityRenderDispatcher, BlockEntityRenderDispatcher blockEntityRenderDispatcher, RenderBuffers renderBuffers, LevelRenderState levelRenderState, FeatureRenderDispatcher featureRenderDispatcher) {
@@ -55,7 +60,7 @@ public final class NexusWorldRender extends LevelRenderer {
         NexusClientMain.resize(nativeContext, width, height);
         long r = NexusClientMain.getGLReady(nativeContext);
         long c = NexusClientMain.getGLComplete(nativeContext);
-        this.renderer = new ExternalImageRender(r, c);
+        this.renderer = new ExternalImageRenderer(r, c);
         LOGGER.info("NexusWorldRender created.");
     }
 
@@ -63,10 +68,12 @@ public final class NexusWorldRender extends LevelRenderer {
     public void close() {
         checkIfClosed();
         super.close();
-        builder.close();
+        if (builder != null) {
+            builder.close();
+        }
         isClosed = true;
-        renderer.close();
-        NexusClientMain.close(nativeContext);
+        renderer.cleanup();
+        // NexusClientMain.close(nativeContext);
     }
 
     public boolean isClosed() {
@@ -81,6 +88,21 @@ public final class NexusWorldRender extends LevelRenderer {
         if (isClosed) {
             throw new IllegalStateException("Renderer has already closed.");
         }
+    }
+
+    @Override
+    public CompletableFuture<Void> reload(SharedState sharedState, Executor executor, PreparationBarrier preparationBarrier, Executor executor2) {
+        return super.reload(sharedState, executor, preparationBarrier, executor2);
+    }
+
+    @Override
+    public void prepareSharedState(SharedState sharedState) {
+        super.prepareSharedState(sharedState);
+    }
+
+    @Override
+    public String getName() {
+        return super.getName();
     }
 
     @Override
@@ -102,8 +124,16 @@ public final class NexusWorldRender extends LevelRenderer {
         this.world = clientLevel;
         if (clientLevel != null) {
             this.builder = new NexusChunkBuilder(clientLevel);
+            if (!rendering) {
+                this.rendering = true;
+                NexusClientMain.startRendering(nativeContext);
+            }
         } else {
             this.builder = null;
+            if (rendering) {
+                this.rendering = false;
+                NexusClientMain.endRendering(nativeContext);
+            }
         }
 
     }
@@ -144,19 +174,23 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
+    public void resetSampler() {}
+
+    @Override
     public @Nullable String getEntityStatistics() {
         return null;
     }
 
     @Override
-    public void addRecentlyCompiledSection(SectionRenderDispatcher.RenderSection renderSection) {}
+    public void addRecentlyCompiledSection(SectionRenderDispatcher.@NonNull RenderSection renderSection) {}
 
     @Override
     public void renderLevel(@NonNull GraphicsResourceAllocator graphicsResourceAllocator, @NonNull DeltaTracker deltaTracker, boolean bl, Camera camera, Matrix4f matrix4f, Matrix4f matrix4f2, Matrix4f matrix4f3, GpuBufferSlice gpuBufferSlice, Vector4f vector4f, boolean bl2) {
         checkIfClosed();
         this.isCompleted = false;
         long t = NexusClientMain.refresh(nativeContext);
-        renderer.refresh(t, width, height);
+        long s = NexusClientMain.getTextureSize(nativeContext);
+        renderer.update(t, width, height, s);
         renderer.render();
         this.isCompleted = true;
     }
@@ -171,16 +205,16 @@ public final class NexusWorldRender extends LevelRenderer {
     public void killFrustum() {}
 
     @Override
-    public void tick(Camera camera) {}
+    public void tick(@NonNull Camera camera) {}
 
     @Override
-    public void blockChanged(BlockGetter blockGetter, BlockPos blockPos, BlockState blockState, BlockState blockState2, int i) {}
+    public void blockChanged(@NonNull BlockGetter blockGetter, @NonNull BlockPos blockPos, @NonNull BlockState blockState, @NonNull BlockState blockState2, int i) {}
 
     @Override
     public void setBlocksDirty(int i, int j, int k, int l, int m, int n) {}
 
     @Override
-    public void setBlockDirty(BlockPos blockPos, BlockState blockState, BlockState blockState2) {}
+    public void setBlockDirty(@NonNull BlockPos blockPos, @NonNull BlockState blockState, @NonNull BlockState blockState2) {}
 
     @Override
     public void setSectionDirtyWithNeighbors(int i, int j, int k) {
@@ -216,6 +250,11 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
+    public boolean isSectionCompiledAndVisible(BlockPos blockPos) {
+        return true;
+    }
+
+    @Override
     public @Nullable RenderTarget entityOutlineTarget() {
         return null;
     }
@@ -247,7 +286,7 @@ public final class NexusWorldRender extends LevelRenderer {
 
     @Override
     public @NotNull ObjectArrayList<SectionRenderDispatcher.RenderSection> getVisibleSections() {
-        return super.getVisibleSections();
+        return new ObjectArrayList<>();
     }
 
     @Override
@@ -263,5 +302,10 @@ public final class NexusWorldRender extends LevelRenderer {
     @Override
     public @NotNull CloudRenderer getCloudRenderer() {
         return super.getCloudRenderer();
+    }
+
+    @Override
+    public Gizmos.TemporaryCollection collectPerFrameGizmos() {
+        return super.collectPerFrameGizmos();
     }
 }

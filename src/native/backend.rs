@@ -25,7 +25,7 @@ use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
 use vulkano::memory::allocator::{MemoryAllocator, StandardMemoryAllocator};
 use vulkano::memory::{DedicatedAllocation, DeviceMemory, ExternalMemoryHandleTypes, MemoryAllocateInfo, MemoryPropertyFlags, ResourceMemory};
-use vulkano::sync::fence::Fence;
+use vulkano::sync::fence::{Fence, FenceCreateInfo};
 use vulkano::sync::semaphore::{ExternalSemaphoreHandleType, ExternalSemaphoreHandleTypes, Semaphore, SemaphoreCreateInfo};
 use vulkano::{NonExhaustive, Version, VulkanLibrary, VulkanObject};
 use windows_sys::Win32::Foundation::CloseHandle;
@@ -201,15 +201,14 @@ impl VkBackend {
         )?;
         builder
             .clear_color_image(ClearColorImageInfo {
-                clear_value: ClearColorValue::Float([0.0, 0.0, 1.0, 1.0]),
+                clear_value: ClearColorValue::Float([0.0, 0.0, 1.0, 0.0]),
                 ..ClearColorImageInfo::image(target.image.clone())
             })?
-            .begin_rendering(RenderingInfo {
+            /*.begin_rendering(RenderingInfo {
                 color_attachments: vec![Some(RenderingAttachmentInfo::image_view(target.image_view))],
                 ..Default::default()
             })?
-            .end_rendering()?;
-
+            .end_rendering()?*/;
         let command_buffer = builder.build()?;
         let fence = Arc::new(Fence::from_pool(self.device())?);
         self.queue.with(|mut queue| -> Result<()> {
@@ -244,15 +243,16 @@ impl VkBackend {
             image_type: ImageType::Dim2d,
             format: Format::R8G8B8A8_UNORM,
             extent: [size.0, size.1, 1],
-            usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED | ImageUsage::STORAGE,
+            usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED | ImageUsage::STORAGE | ImageUsage::TRANSFER_DST,
             external_memory_handle_types: ExternalMemoryHandleTypes::OPAQUE_WIN32,
             ..Default::default()
         };
         let raw_image = RawImage::new(self.device(), create_info)
             .map_err(|err| anyhow!("backend.rs:error in creating RawImage: {:?}", err) )?;
+        let size = raw_image.memory_requirements()[0].layout.size();
         let memory = self.memory_allocator.allocate_dedicated(
             self.memory_type_index,
-            raw_image.memory_requirements()[0].layout.size(),
+            size,
             Some(DedicatedAllocation::Image(&raw_image)),
             #[cfg(windows)] ExternalMemoryHandleTypes::OPAQUE_WIN32,
             #[cfg(unix)] ExternalMemoryHandleTypes::OPAQUE_FD
@@ -276,7 +276,7 @@ impl VkBackend {
                 .map_err(|err| anyhow!("backend.rs:error in getting external memory handle: {:?}", err))?
         };
         let view = ImageView::new_default(image.clone()).map_err(|err| anyhow!("backend.rs:error in creating image view: {:?}", err) )?;
-        self.render_target.reset(device_memory, image, handle, view).map_err(|err| anyhow!("backend.rs:error in resetting RenderTarget: {:?}", err) )?;
+        self.render_target.reset(device_memory, image, handle, view, size).map_err(|err| anyhow!("backend.rs:error in resetting RenderTarget: {:?}", err) )?;
         Ok(())
     }
     
@@ -447,6 +447,7 @@ pub struct RenderTargetWrapper(Arc<RwLock<Option<RenderTarget>>>);
 #[derive(Clone)]
 pub struct RenderTarget {
     pub memory: Arc<DeviceMemory>,
+    pub size: u64,
     pub handle: HANDLE,
     pub image: Arc<Image>,
     pub image_view: Arc<ImageView>
@@ -473,9 +474,9 @@ impl RenderTargetWrapper {
         self.0.read().map_err(|err| anyhow!("{}", err))?.clone().ok_or(anyhow!("backend.rs:render target not found"))
     }
 
-    pub fn reset(&self, memory: Arc<DeviceMemory>, image: Arc<Image>, handle: HANDLE, image_view: Arc<ImageView>) -> Result<()> {
+    pub fn reset(&self, memory: Arc<DeviceMemory>, image: Arc<Image>, handle: HANDLE, image_view: Arc<ImageView>, size: u64) -> Result<()> {
         let mut value = self.0.write().map_err(|err| anyhow!("{}", err))?;
-        *value = Some(RenderTarget{memory, handle, image, image_view});
+        *value = Some(RenderTarget{memory, handle, image, image_view, size});
         Ok(())
     }
 }

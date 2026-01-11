@@ -16,7 +16,7 @@ public abstract class MinecraftMixin {
                     target = "Lnet/minecraft/client/Minecraft;levelRenderer:Lnet/minecraft/client/renderer/LevelRenderer;",
                     opcode = Opcodes.PUTFIELD
             ))
-    public void init(Minecraft instance, LevelRenderer value){
+    public void init(Minecraft instance, LevelRenderer value) {
         instance.levelRenderer = new NexusWorldRender(instance,
                 instance.getEntityRenderDispatcher(),
                 instance.getBlockEntityRenderDispatcher(),

@@ -60,6 +60,17 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_refresh<'local>(
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_getTextureSize<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    ctx: jlong,
+) -> jlong {
+    let renderer = unsafe { load_context(ctx) };
+    renderer.target().get_value().unwrap().size as i64 as jlong
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
 extern "system" fn  Java_io_github_liyze09_nexus_NexusClientMain_getGLReady<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
