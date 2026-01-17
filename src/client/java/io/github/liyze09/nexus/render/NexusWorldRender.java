@@ -1,6 +1,7 @@
 package io.github.liyze09.nexus.render;
 
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.framegraph.FrameGraphBuilder;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import io.github.liyze09.nexus.NexusClientMain;
@@ -42,7 +43,7 @@ public final class NexusWorldRender extends LevelRenderer {
     @Nullable
     private volatile ClientLevel world = null;
     @SuppressWarnings("unused")
-    private Minecraft minecraft;
+    private final Minecraft minecraft;
     private ExternalImageRenderer renderer;
     private volatile boolean isCompleted = true;
     private final long nativeContext;
@@ -60,7 +61,7 @@ public final class NexusWorldRender extends LevelRenderer {
         NexusClientMain.resize(nativeContext, width, height);
         long r = NexusClientMain.getGLReady(nativeContext);
         long c = NexusClientMain.getGLComplete(nativeContext);
-        this.renderer = new ExternalImageRenderer(r, c);
+        this.renderer = new ExternalImageRenderer(r, c, NexusClientMain.getGLTexture(nativeContext), width, height, NexusClientMain.getTextureSize(nativeContext));
         LOGGER.info("NexusWorldRender created.");
     }
 
@@ -91,17 +92,17 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public CompletableFuture<Void> reload(SharedState sharedState, Executor executor, PreparationBarrier preparationBarrier, Executor executor2) {
+    public @NonNull CompletableFuture<Void> reload(@NonNull SharedState sharedState, @NonNull Executor executor, PreparationBarrier preparationBarrier, Executor executor2) {
         return super.reload(sharedState, executor, preparationBarrier, executor2);
     }
 
     @Override
-    public void prepareSharedState(SharedState sharedState) {
+    public void prepareSharedState(@NonNull SharedState sharedState) {
         super.prepareSharedState(sharedState);
     }
 
     @Override
-    public String getName() {
+    public @NonNull String getName() {
         return super.getName();
     }
 
@@ -126,13 +127,11 @@ public final class NexusWorldRender extends LevelRenderer {
             this.builder = new NexusChunkBuilder(clientLevel);
             if (!rendering) {
                 this.rendering = true;
-                NexusClientMain.startRendering(nativeContext);
             }
         } else {
             this.builder = null;
             if (rendering) {
                 this.rendering = false;
-                NexusClientMain.endRendering(nativeContext);
             }
         }
 
@@ -146,6 +145,8 @@ public final class NexusWorldRender extends LevelRenderer {
         this.width = i;
         this.height = j;
         NexusClientMain.resize(nativeContext, width, height);
+        this.renderer.cleanup();
+        this.renderer = new ExternalImageRenderer(NexusClientMain.getGLReady(nativeContext), NexusClientMain.getGLComplete(nativeContext), NexusClientMain.getGLTexture(nativeContext), width, height, NexusClientMain.getTextureSize(nativeContext));
     }
 
     @Override
@@ -185,13 +186,13 @@ public final class NexusWorldRender extends LevelRenderer {
     public void addRecentlyCompiledSection(SectionRenderDispatcher.@NonNull RenderSection renderSection) {}
 
     @Override
-    public void renderLevel(@NonNull GraphicsResourceAllocator graphicsResourceAllocator, @NonNull DeltaTracker deltaTracker, boolean bl, Camera camera, Matrix4f matrix4f, Matrix4f matrix4f2, Matrix4f matrix4f3, GpuBufferSlice gpuBufferSlice, Vector4f vector4f, boolean bl2) {
+    public void renderLevel(@NonNull GraphicsResourceAllocator graphicsResourceAllocator, @NonNull DeltaTracker deltaTracker, boolean bl, @NonNull Camera camera, @NonNull Matrix4f matrix4f, @NonNull Matrix4f matrix4f2, @NonNull Matrix4f matrix4f3, @NonNull GpuBufferSlice gpuBufferSlice, @NonNull Vector4f vector4f, boolean bl2) {
         checkIfClosed();
         this.isCompleted = false;
-        long t = NexusClientMain.refresh(nativeContext);
-        long s = NexusClientMain.getTextureSize(nativeContext);
-        renderer.update(t, width, height, s);
-        renderer.render();
+        renderer.render(() -> NexusClientMain.render(nativeContext));
+        var target = this.minecraft.getMainRenderTarget();
+        target.colorTexture = renderer.blaze3dTexture;
+        target.colorTextureView = renderer.blaze3dTextureView;
         this.isCompleted = true;
     }
 

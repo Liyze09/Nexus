@@ -13,12 +13,12 @@ public class NexusClientMain implements ClientModInitializer {
 	}
 
 	public static native long initNative();
-	public static native long refresh(long ctx);
+
+	public static native long render(long ctx);
     public static native void close(long ctx);
 	public static native long getTextureSize(long ctx);
     public static native void resize(long ctx, int width, int height);
     public static native long getGLReady(long ctx);
     public static native long getGLComplete(long ctx);
-	public static native void startRendering(long ctx);
-	public static native void endRendering(long ctx);
+	public static native long getGLTexture(long ctx);
 }

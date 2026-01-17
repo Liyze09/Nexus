@@ -30,23 +30,14 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_initNative<'loca
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_refresh<'local>(
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_getTextureSize<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     ctx: jlong,
 ) -> jlong {
     let renderer = unsafe { load_context(ctx) };
-    renderer.state().handle_error(
-        |e| {
-            env.throw_new(
-                String::from("io/github/liyze09/nexus/exception/VulkanException"),
-                e.to_string(),
-            )
-                .unwrap();
-        }
-    );
     match renderer.target().get_value() {
-        Ok(target) => target.handle as i64 as jlong,
+        Ok(target) => target.size as i64 as jlong,
         Err(err) => {
             env.throw_new(
                 String::from("io/github/liyze09/nexus/exception/VulkanException"),
@@ -56,17 +47,6 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_refresh<'local>(
             -1
         }
     }
-}
-
-#[allow(non_snake_case)]
-#[unsafe(no_mangle)]
-extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_getTextureSize<'local>(
-    _env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    ctx: jlong,
-) -> jlong {
-    let renderer = unsafe { load_context(ctx) };
-    renderer.target().get_value().unwrap().size as i64 as jlong
 }
 
 #[allow(non_snake_case)]
@@ -124,31 +104,59 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_resize<'local>(
                 .unwrap();
         }
     }
-
 }
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_startRendering<'local>(
-    _env: JNIEnv<'local>,
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_render<'local>(
+    mut env: JNIEnv<'local>,
     _class: JClass<'local>,
-    ctx: jlong
-) {
-
+    ctx: jlong,
+) -> jlong {
     let renderer = unsafe { load_context(ctx) };
-    renderer.start_rendering_thread();
+    match renderer.render_and_wait() {
+        Ok(_) => {},
+        Err(err) => {
+            env.throw_new(
+                String::from("io/github/liyze09/nexus/exception/VulkanException"),
+                err.to_string(),
+            )
+                .unwrap();
+        }
+    }
+
+    match renderer.target().get_value() {
+        Ok(target) => target.handle as i64 as jlong,
+        Err(err) => {
+            env.throw_new(
+                String::from("io/github/liyze09/nexus/exception/VulkanException"),
+                err.to_string(),
+            )
+            .unwrap();
+            -1
+        }
+    }
 }
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_endRendering<'local>(
-    _env: JNIEnv<'local>,
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_getGLTexture<'local>(
+    mut env: JNIEnv<'local>,
     _class: JClass<'local>,
-    ctx: jlong
-) {
-
+    ctx: jlong,
+) -> jlong {
     let renderer = unsafe { load_context(ctx) };
-    renderer.end_rendering_thread();
+    match renderer.target().get_value() {
+        Ok(target) => target.handle as i64 as jlong,
+        Err(err) => {
+            env.throw_new(
+                String::from("io/github/liyze09/nexus/exception/VulkanException"),
+                err.to_string(),
+            )
+            .unwrap();
+            -1
+        }
+    }
 }
 
 unsafe fn load_context(addr: i64) -> Arc<VkBackend> {

@@ -1,7 +1,7 @@
 #![allow(dead_code, unused)]
 use anyhow::{anyhow, Error, Result};
 use ash::khr::ray_tracing_pipeline;
-use ash::vk::{ExternalMemoryHandleTypeFlags, MemoryGetWin32HandleInfoKHR, HANDLE};
+use ash::vk::{ExternalMemoryHandleTypeFlags, HANDLE, MemoryGetWin32HandleInfoKHR};
 use dashmap::DashMap;
 use rayon::prelude::*;
 use smallvec::smallvec;
@@ -21,7 +21,7 @@ use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, DeviceFeatures
 use vulkano::format::{ClearColorValue, Format};
 use vulkano::image::sys::RawImage;
 use vulkano::image::view::ImageView;
-use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
+use vulkano::image::{Image, ImageCreateInfo, ImageLayout, ImageType, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
 use vulkano::memory::allocator::{MemoryAllocator, StandardMemoryAllocator};
 use vulkano::memory::{DedicatedAllocation, DeviceMemory, ExternalMemoryHandleTypes, MemoryAllocateInfo, MemoryPropertyFlags, ResourceMemory};
@@ -35,14 +35,14 @@ use crate::geometry::{GeometryType, GeometryManager};
 #[derive(Clone)]
 pub struct VkBackend {
     raw: Raw,
-    queue: Arc<Queue>,
+    queues: Queues,
+    device: Arc<Device>,
     memory_allocator: Arc<StandardMemoryAllocator>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     size: Arc<RwLock<(u32, u32)>>,
     memory_type_index: u32,
     render_target: RenderTargetWrapper,
     semaphore: SharedSemaphore,
-    state: Arc<RenderState>,
     geometry_manager: Arc<GeometryManager>
 }
 
@@ -93,6 +93,7 @@ impl VkBackend {
                 }],
                 enabled_extensions: DeviceExtensions {
                     khr_external_memory: true,
+                    khr_external_semaphore: true,
                     #[cfg(windows)] khr_external_memory_win32: true,
                     #[cfg(windows)] khr_external_semaphore_win32: true,
                     #[cfg(unix)] khr_external_memory_fd: true,
@@ -100,7 +101,7 @@ impl VkBackend {
                     khr_acceleration_structure: device_properties.ray_trace,
                     khr_ray_tracing_pipeline: device_properties.ray_trace,
                     khr_ray_query: device_properties.ray_trace,
-                    khr_deferred_host_operations: device_properties.ray_trace,
+                    khr_synchronization2: true,
                     ..Default::default()
                 },
                 enabled_features: DeviceFeatures {
@@ -114,7 +115,7 @@ impl VkBackend {
             },
         )?;
         let memory_type_index = physical_device.memory_properties().memory_types.iter().position(|i| i.property_flags.contains(MemoryPropertyFlags::DEVICE_LOCAL)).ok_or(anyhow!("no suitable device memory type"))? as u32;
-        let queue = queues.next().unwrap();
+        let queues = Queues::select(queues)?;
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
         let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(), StandardCommandBufferAllocatorCreateInfo::default())
@@ -150,7 +151,8 @@ impl VkBackend {
             ).map_err(|err| anyhow!("backend.rs:error in creating ray tracing pipeline: {:?}", err))?;*/
         Ok(VkBackend {
             raw,
-            queue,
+            queues,
+            device,
             memory_allocator: memory_allocator.clone(),
             command_buffer_allocator,
             size: Arc::new(RwLock::new((0, 0))),
@@ -162,33 +164,12 @@ impl VkBackend {
                 handle_gl_complete: gl_complete.export_win32_handle(ExternalSemaphoreHandleType::OpaqueWin32).map_err(|err| anyhow!("backend.rs:error in exporting semaphore gl_complete: {:?}", err))?,
                 gl_complete: Arc::new(gl_complete),
             },
-            state: Arc::new(RenderState::default()),
             geometry_manager: Arc::new(GeometryManager::new(memory_allocator))
         })
     }
-
-    pub fn start_rendering_thread(self: Arc<Self>) {
-        if self.state.closed() {
-            return
-        }
-        self.state.set_available(true);
-        let this = self.clone();
-        thread::spawn(move || {
-            while(this.state.available()) {
-                    if let Err(e) = this.render_and_wait() {
-                        this.state.set_error(e);
-                        break;
-                    };
-            }
-        });
-    }
-
-    pub fn end_rendering_thread(&self) {
-        self.state().set_available(false);
-    }
     
     #[inline]
-    fn render_and_wait(&self) -> Result<()> {
+    pub fn render_and_wait(&self) -> Result<()> {
         Ok(self.render()?.wait(None)?)
     }
 
@@ -196,12 +177,13 @@ impl VkBackend {
         let target = self.render_target.get_value()?;
         let mut builder = AutoCommandBufferBuilder::primary(
             self.command_buffer_allocator.clone(),
-            self.queue.queue_family_index(),
+            self.queues.graphics.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
         )?;
         builder
             .clear_color_image(ClearColorImageInfo {
                 clear_value: ClearColorValue::Float([0.0, 0.0, 1.0, 0.0]),
+                image_layout: ImageLayout::General,
                 ..ClearColorImageInfo::image(target.image.clone())
             })?
             /*.begin_rendering(RenderingInfo {
@@ -211,7 +193,7 @@ impl VkBackend {
             .end_rendering()?*/;
         let command_buffer = builder.build()?;
         let fence = Arc::new(Fence::from_pool(self.device())?);
-        self.queue.with(|mut queue| -> Result<()> {
+        self.queues.graphics.with(|mut queue| -> Result<()> {
             unsafe { Ok(queue.submit(
                 &[SubmitInfo {
                     wait_semaphores: vec![SemaphoreSubmitInfo::new(self.semaphore.gl_complete.clone())],
@@ -243,7 +225,7 @@ impl VkBackend {
             image_type: ImageType::Dim2d,
             format: Format::R8G8B8A8_UNORM,
             extent: [size.0, size.1, 1],
-            usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED | ImageUsage::STORAGE | ImageUsage::TRANSFER_DST,
+            usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED | ImageUsage::STORAGE | ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC,
             external_memory_handle_types: ExternalMemoryHandleTypes::OPAQUE_WIN32,
             ..Default::default()
         };
@@ -291,8 +273,8 @@ impl VkBackend {
     }
 
     #[inline]
-    pub fn queue(&self) -> Arc<Queue> {
-        self.queue.clone()
+    pub fn queue(&self) -> Queues {
+        self.queues.clone()
     }
 
     #[inline]
@@ -307,22 +289,17 @@ impl VkBackend {
 
     #[inline]
     pub fn device(&self) -> Arc<Device> {
-        self.queue.device().clone()
+        self.device.clone()
     }
 
     #[inline]
     pub fn physical_device(&self) -> Arc<PhysicalDevice> {
-        self.device().physical_device().clone()
+        self.device.physical_device().clone()
     }
 
     #[inline]
     pub fn instance(&self) -> Arc<Instance> {
-        self.device().instance().clone()
-    }
-    
-    #[inline]
-    pub(crate) fn state(&self) -> Arc<RenderState> {
-        self.state.clone()
+        self.device.instance().clone()
     }
 }
 
@@ -354,7 +331,6 @@ fn check_physical_device(physical_device: Arc<PhysicalDevice>) -> DeviceProperti
 
 impl Drop for VkBackend {
     fn drop(&mut self) {
-        self.state.close();
         self.render_target.destroy();
     }
 }
@@ -395,53 +371,6 @@ impl Raw {
     }
 }
 
-#[derive(Default)]
-pub struct RenderState {
-    rendering: AtomicBool,
-    closed: AtomicBool,
-    error: Mutex<Option<Error>>,
-}
-
-impl RenderState {
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[inline]
-    pub fn closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst)
-    }
-
-    #[inline]
-    fn close(&self) {
-        self.set_available(false);
-        self.closed.store(true, Ordering::SeqCst);
-    }
-    
-    #[inline]
-    pub fn available(&self) -> bool {
-        self.rendering.load(Ordering::SeqCst)
-    }
-    
-    #[inline]
-    pub fn set_available(&self, available: bool) {
-        self.rendering.store(available, Ordering::SeqCst);
-    }
-    
-    #[inline]
-    pub fn handle_error(&self, handler: impl FnOnce(&Error)) {
-        if let Some(e) = &self.error.lock().unwrap().take() {
-            handler(e)
-        }
-    }
-    
-    #[inline]
-    pub fn set_error(&self, error: Error) {
-        self.error.lock().unwrap().replace(error);
-    }
-}
-
 #[derive(Clone, Default)]
 pub struct RenderTargetWrapper(Arc<RwLock<Option<RenderTarget>>>);
 #[derive(Clone)]
@@ -451,6 +380,90 @@ pub struct RenderTarget {
     pub handle: HANDLE,
     pub image: Arc<Image>,
     pub image_view: Arc<ImageView>
+}
+
+#[derive(Clone)]
+pub struct Queues {
+    pub graphics: Arc<Queue>,
+    pub compute: Arc<Queue>,
+    pub transfer: Arc<Queue>,
+}
+
+impl Queues {
+    pub fn select(queues: impl ExactSizeIterator <Item = Arc<Queue>>) -> Result<Self> {
+        let mut graphics = None;
+        let mut compute = None;
+        let mut transfer = None;
+
+        let mut queue_infos = Vec::new();
+        for queue in queues {
+            let props = queue.device().physical_device().queue_family_properties()[queue.queue_family_index() as usize].clone();
+            let index = queue.queue_family_index().clone();
+            queue_infos.push((queue, props.queue_flags, index));
+        }
+
+        let mut used_families = Vec::new();
+
+        for (queue, flags, family_index) in &queue_infos {
+            if flags.contains(QueueFlags::GRAPHICS) && graphics.is_none() {
+                graphics = Some(queue.clone());
+                used_families.push(*family_index);
+                break;
+            }
+        }
+
+        for (queue, flags, family_index) in &queue_infos {
+            if flags.contains(QueueFlags::COMPUTE) && compute.is_none() {
+                if !flags.contains(QueueFlags::GRAPHICS) && !used_families.contains(family_index) {
+                    compute = Some(queue.clone());
+                    used_families.push(*family_index);
+                    break;
+                }
+            }
+        }
+
+        if compute.is_none() {
+            for (queue, flags, family_index) in &queue_infos {
+                if flags.contains(QueueFlags::COMPUTE) && compute.is_none() {
+                    compute = Some(queue.clone());
+                    if !used_families.contains(family_index) {
+                        used_families.push(*family_index);
+                    }
+                    break;
+                }
+            }
+        }
+
+        for (queue, flags, family_index) in &queue_infos {
+            if flags.contains(QueueFlags::TRANSFER) && transfer.is_none() {
+                if !flags.contains(QueueFlags::GRAPHICS) &&
+                   !flags.contains(QueueFlags::COMPUTE) &&
+                   !used_families.contains(family_index) {
+                    transfer = Some(queue.clone());
+                    used_families.push(*family_index);
+                    break;
+                }
+            }
+        }
+
+        if transfer.is_none() {
+            for (queue, flags, family_index) in &queue_infos {
+                if flags.contains(QueueFlags::TRANSFER) && transfer.is_none() {
+                    transfer = Some(queue.clone());
+                    if !used_families.contains(family_index) {
+                        used_families.push(*family_index);
+                    }
+                    break;
+                }
+            }
+        }
+        let graphics = graphics.ok_or(anyhow!("no graphics queue found"))?.clone();
+        Ok(Queues {
+            graphics: graphics.clone(),
+            compute: compute.ok_or(anyhow!("no compute queue found"))?.clone(),
+            transfer: transfer.unwrap_or_else(|| graphics).clone(),
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -464,10 +477,14 @@ pub struct SharedSemaphore {
 impl RenderTargetWrapper {
     pub fn destroy(&self) -> Result<()> {
         let mut value = self.0.write().map_err(|err| anyhow!("{}", err))?;
-        if let Some(mem) = &*value {
-            unsafe { CloseHandle(mem.handle as _); }
+        let value = value.take();
+        if let Some(value) = value {
+           let handle = value.handle;
+           drop(value);
+           unsafe {
+               CloseHandle(handle as _);
+           }
         }
-        *value = None;
         Ok(())
     }
     pub fn get_value(&self) -> Result<RenderTarget> {
@@ -486,5 +503,3 @@ pub struct DeviceProperties {
     ray_trace: bool,
     score: u32,
 }
-
-

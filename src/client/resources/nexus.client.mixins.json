@@ -7,6 +7,7 @@
   },
   "client": [
     "client.ClientChunkCacheMixin",
+    "client.DMixinWindow",
     "client.MinecraftMixin"
   ]
 }

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
 
 use anyhow::{Ok, Result};
-use vulkano::{acceleration_structure::{AccelerationStructureBuildRangeInfo, AccelerationStructureBuildType, AccelerationStructureGeometryAabbsData}, command_buffer::CommandBufferExecFuture, format::Format, sync::future::{FenceSignalFuture, NowFuture}};
+use vulkano::{acceleration_structure::{AccelerationStructureBuildRangeInfo, AccelerationStructureBuildType, AccelerationStructureGeometryAabbsData}, format::Format};
 use dashmap::DashMap;
 use vulkano::{acceleration_structure::{AccelerationStructure, AccelerationStructureBuildGeometryInfo, AccelerationStructureCreateInfo, AccelerationStructureGeometries, AccelerationStructureGeometryTrianglesData, AccelerationStructureType}, buffer::{BufferUsage, Subbuffer, allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo}}, command_buffer::{self, CopyBufferInfo}, memory::allocator::{MemoryTypeFilter, StandardMemoryAllocator}, sync::{self, GpuFuture}};
 use smallvec::smallvec;
@@ -44,13 +44,13 @@ impl GeometryManager {
         id
     }
 
-    pub fn build(&self, backend: &VkBackend) -> Result<FenceSignalFuture<CommandBufferExecFuture<CommandBufferExecFuture<NowFuture>>>> {
+    pub fn build(&self, backend: &VkBackend) -> Result<impl GpuFuture> {
         let temp_geometry = self.temp_geometry.lock().unwrap();
         let mut buffers = Vec::with_capacity(temp_geometry.len());
         let device_subbuffer_alloc = self.device_subbuffer_alloc.lock().unwrap();
         let mut command_buffer_builder_copy = command_buffer::AutoCommandBufferBuilder::primary(
                 backend.command_buffer_allocator(),
-                backend.queue().queue_family_index(),
+                backend.queue().transfer.queue_family_index(),
                 command_buffer::CommandBufferUsage::OneTimeSubmit,
         )?;
         {
@@ -72,7 +72,7 @@ impl GeometryManager {
         }
         let mut command_buffer_builder_build = command_buffer::AutoCommandBufferBuilder::primary(
             backend.command_buffer_allocator(),
-            backend.queue().queue_family_index(),
+            backend.queue().compute.queue_family_index(),
             command_buffer::CommandBufferUsage::OneTimeSubmit,
         )?;
         let mut build_infos = Vec::new();
@@ -141,8 +141,9 @@ impl GeometryManager {
         let command_buffer_copy = command_buffer_builder_copy.build()?;
         let command_buffer_build = command_buffer_builder_build.build()?;
         let future = sync::now(backend.device())
-            .then_execute(backend.queue().clone(), command_buffer_copy)?
-            .then_execute(backend.queue().clone(), command_buffer_build)?
+            .then_execute(backend.queue().transfer.clone(), command_buffer_copy)?
+            .then_signal_semaphore_and_flush()?
+            .then_execute(backend.queue().compute.clone(), command_buffer_build)?
             .then_signal_fence_and_flush()?;
         Ok(future)
     }
@@ -152,9 +153,4 @@ impl GeometryManager {
 pub enum GeometryType {
     Triangles,
     AABBs,
-}
-
-pub enum AccelerationStructureCache {
-    Temporary((Vec<u8>, GeometryType)),
-    Built(Arc<AccelerationStructure>),
 }
