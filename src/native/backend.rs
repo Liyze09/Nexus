@@ -6,7 +6,8 @@ use dashmap::DashMap;
 use rayon::prelude::*;
 use smallvec::smallvec;
 use vulkano::acceleration_structure::AccelerationStructure;
-use vulkano::buffer::Subbuffer;
+use vulkano::buffer::{BufferContents, BufferUsage, Subbuffer};
+use vulkano::buffer::allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo};
 use vulkano::pipeline::PipelineLayout;
 use vulkano::pipeline::layout::PipelineLayoutCreateInfo;
 use vulkano::pipeline::ray_tracing::{RayTracingPipeline, RayTracingPipelineCreateInfo};
@@ -14,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, PrimaryCommandBufferAbstract};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract};
 use vulkano::command_buffer::{ClearColorImageInfo, CommandBufferSubmitInfo, RenderingAttachmentInfo, RenderingInfo, SemaphoreSubmitInfo, SubmitInfo};
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, DeviceFeatures, Queue, QueueCreateInfo, QueueFlags};
@@ -23,14 +24,14 @@ use vulkano::image::sys::RawImage;
 use vulkano::image::view::ImageView;
 use vulkano::image::{Image, ImageCreateInfo, ImageLayout, ImageType, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
-use vulkano::memory::allocator::{MemoryAllocator, StandardMemoryAllocator};
+use vulkano::memory::allocator::{MemoryAllocator, MemoryTypeFilter, StandardMemoryAllocator};
 use vulkano::memory::{DedicatedAllocation, DeviceMemory, ExternalMemoryHandleTypes, MemoryAllocateInfo, MemoryPropertyFlags, ResourceMemory};
 use vulkano::sync::fence::{Fence, FenceCreateInfo};
 use vulkano::sync::semaphore::{ExternalSemaphoreHandleType, ExternalSemaphoreHandleTypes, Semaphore, SemaphoreCreateInfo};
 use vulkano::{NonExhaustive, Version, VulkanLibrary, VulkanObject};
 use windows_sys::Win32::Foundation::CloseHandle;
 
-use crate::geometry::{GeometryType, GeometryManager};
+use crate::geometry::{GeometryData, GeometryManager, GeometryType};
 
 #[derive(Clone)]
 pub struct VkBackend {
@@ -43,7 +44,8 @@ pub struct VkBackend {
     memory_type_index: u32,
     render_target: RenderTargetWrapper,
     semaphore: SharedSemaphore,
-    geometry_manager: Arc<GeometryManager>
+    geometry_manager: Arc<GeometryManager>,
+    host_subbuffer_alloc: Arc<Mutex<SubbufferAllocator>>,
 }
 
 impl VkBackend {
@@ -164,7 +166,13 @@ impl VkBackend {
                 handle_gl_complete: gl_complete.export_win32_handle(ExternalSemaphoreHandleType::OpaqueWin32).map_err(|err| anyhow!("backend.rs:error in exporting semaphore gl_complete: {:?}", err))?,
                 gl_complete: Arc::new(gl_complete),
             },
-            geometry_manager: Arc::new(GeometryManager::new(memory_allocator))
+            geometry_manager: Arc::new(GeometryManager::new(memory_allocator.clone())),
+            host_subbuffer_alloc: Arc::new(Mutex::new(SubbufferAllocator::new(memory_allocator,
+        SubbufferAllocatorCreateInfo {
+                buffer_usage: BufferUsage::TRANSFER_SRC,
+                memory_type_filter: MemoryTypeFilter::PREFER_HOST,
+                ..Default::default()
+            }))),
         })
     }
     
@@ -207,8 +215,8 @@ impl VkBackend {
         Ok(fence)
     }
 
-    pub fn build_acceleration_structure(&self, buffer: Vec<u8>, geometry_type: GeometryType) -> u64 {
-        self.geometry_manager.add_temporary_geometry(buffer, geometry_type)
+    pub fn build_acceleration_structure(&self, geometry_data: GeometryData) -> u64 {
+        self.geometry_manager.add_temporary_geometry(geometry_data)
     }
 
     #[inline]
@@ -300,6 +308,17 @@ impl VkBackend {
     #[inline]
     pub fn instance(&self) -> Arc<Instance> {
         self.device.instance().clone()
+    }
+
+    pub fn transfer_data<L, D: BufferContents + Copy>(&self, data: &Vec<D>, target: Subbuffer<[D]>, command_buffer: &mut AutoCommandBufferBuilder<L>) -> Result<Subbuffer<[D]>> {
+        let host_subbuffer_alloc = self.host_subbuffer_alloc.lock().map_err(|err| anyhow!("backend.rs:error in locking host subbuffer allocator: {:?}", err))?;
+        let host_buffer = host_subbuffer_alloc.allocate_slice(data.len() as vulkano::DeviceSize)?;
+        {
+            let mut host_content = host_buffer.write()?;
+            host_content.copy_from_slice(data);
+        }
+        command_buffer.copy_buffer(CopyBufferInfo::buffers(host_buffer.clone(), target.clone()))?;
+        Ok(target)
     }
 }
 
