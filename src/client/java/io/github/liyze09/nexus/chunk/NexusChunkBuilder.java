@@ -1,18 +1,10 @@
 package io.github.liyze09.nexus.chunk;
 
-import java.io.Closeable;
-import java.lang.foreign.Arena;
-import java.lang.foreign.MemoryLayout;
-import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
-import java.util.ArrayList;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReferenceArray;
-
 import io.github.liyze09.nexus.NexusClientMain;
-import io.github.liyze09.nexus.model.block.*;
+import io.github.liyze09.nexus.model.block.Mesh;
+import io.github.liyze09.nexus.model.block.Model;
+import io.github.liyze09.nexus.model.block.ModelManager;
+import io.github.liyze09.nexus.model.block.VisibleFaces;
 import io.github.liyze09.nexus.utils.LayeredBlockGetter;
 import io.github.liyze09.nexus.utils.VkPos;
 import net.minecraft.client.Camera;
@@ -28,25 +20,32 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.Closeable;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemoryLayout;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReferenceArray;
+
 public class NexusChunkBuilder implements Closeable {
-    ClientLevel world;
     final Arena arena = Arena.ofShared();
-    AtomicReferenceArray<LevelChunk> chunks;
     final Map<ChunkPos, LevelChunk> loadedChunks;
     final Map<ChunkPos, BuiltChunk> builtChunks;
+    ClientLevel world;
+    AtomicReferenceArray<LevelChunk> chunks;
     Camera camera;
     CollisionContext collisionContext = CollisionContext.empty();
+
     public NexusChunkBuilder(@NotNull ClientLevel world) {
         this.world = world;
         this.chunks = world.getChunkSource().storage.chunks;
         this.loadedChunks = new ConcurrentHashMap<>(chunks.length());
         this.builtChunks = new ConcurrentHashMap<>(chunks.length());
         rebuild0(chunks, loadedChunks);
-    }
-
-    public void setCamera(@Nullable Camera camera) {
-        this.camera = camera;
-        this.collisionContext = camera == null ? CollisionContext.empty() : CollisionContext.of(camera.entity());
     }
 
     private static void rebuild0(@NotNull AtomicReferenceArray<LevelChunk> chunks, Map<ChunkPos, LevelChunk> loadedChunks) {
@@ -56,6 +55,11 @@ public class NexusChunkBuilder implements Closeable {
                 loadedChunks.put(chunk.getPos(), chunk);
             }
         }
+    }
+
+    public void setCamera(@Nullable Camera camera) {
+        this.camera = camera;
+        this.collisionContext = camera == null ? CollisionContext.empty() : CollisionContext.of(camera.entity());
     }
 
     public void load(LevelChunk chunk) {
@@ -85,7 +89,9 @@ public class NexusChunkBuilder implements Closeable {
 
     public void build(ChunkPos chunkPos) {
         LevelChunk chunk = loadedChunks.get(chunkPos);
-        if (chunk == null) {return;}
+        if (chunk == null) {
+            return;
+        }
         ModelManager modelManager = ModelManager.getInstance();
         BuiltChunk builtChunk = new BuiltChunk();
         LayeredBlockGetter blockGetter = new LayeredBlockGetter(world, chunk);
@@ -99,7 +105,7 @@ public class NexusChunkBuilder implements Closeable {
             blockGetter.setSection(section, i);
             BlockPos blockPos0 = SectionPos.of(chunkPos, i).origin();
             BlockPos blockPos1 = blockPos0.offset(15, 15, 15);
-            for (BlockPos pos: BlockPos.betweenClosed(blockPos0, blockPos1)) {
+            for (BlockPos pos : BlockPos.betweenClosed(blockPos0, blockPos1)) {
                 BlockState state = section.getBlockState(pos.getX() - blockPos0.getX(), pos.getY() - blockPos0.getY(), pos.getZ() - blockPos0.getZ());
                 if (state.isAir()) {
                     continue;
@@ -135,7 +141,7 @@ public class NexusChunkBuilder implements Closeable {
                 aabbs.addAll(aabb);
             }
         }
-        
+
         if (!aabbs.isEmpty()) {
             var layout = MemoryLayout.sequenceLayout(
                     aabbs.size() * 6L,
@@ -153,7 +159,7 @@ public class NexusChunkBuilder implements Closeable {
             }
             builtChunk.segmentAABB = segment_aabb;
         }
-        
+
         builtChunks.put(chunkPos, builtChunk);
     }
 
@@ -163,6 +169,7 @@ public class NexusChunkBuilder implements Closeable {
 
     public class BuiltChunk {
         MemorySegment segmentAABB = MemorySegment.NULL;
+
         public BuiltChunk() {
 
         }

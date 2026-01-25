@@ -15,15 +15,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 @Mixin(ClientChunkCache.class)
-public class ClientChunkCacheMixin {
+public class MixinClientChunkCache {
     @Inject(method = "updateViewRadius", at = @At("TAIL"))
-    public void onViewRadiusChanged(int i, CallbackInfo ci) {
+    public void nexus$onViewRadiusChanged(int i, CallbackInfo ci) {
         NexusWorldRender render = (NexusWorldRender) Minecraft.getInstance().levelRenderer;
         if (render.builder != null && render.getWorld() != null) {
-            render.builder.rebuild(render.getWorld());
+            render.builder.rebuild(Objects.requireNonNull(render.getWorld()));
         } else {
             render.builder.close();
             render.builder = null;
@@ -31,7 +32,7 @@ public class ClientChunkCacheMixin {
     }
 
     @Inject(method = "replaceWithPacketData", at = @At("RETURN"))
-    public void onUpdateChunk(int i, int j, FriendlyByteBuf friendlyByteBuf, Map<Heightmap.Types, long[]> map, Consumer<ClientboundLevelChunkPacketData.BlockEntityTagOutput> consumer, CallbackInfoReturnable<LevelChunk> cir) {
+    public void nexus$onUpdateChunk(int i, int j, FriendlyByteBuf friendlyByteBuf, Map<Heightmap.Types, long[]> map, Consumer<ClientboundLevelChunkPacketData.BlockEntityTagOutput> consumer, CallbackInfoReturnable<LevelChunk> cir) {
         NexusWorldRender render = (NexusWorldRender) Minecraft.getInstance().levelRenderer;
         if (render.builder != null) {
             render.builder.load(cir.getReturnValue());
@@ -39,7 +40,7 @@ public class ClientChunkCacheMixin {
     }
 
     @Inject(method = "drop", at = @At("HEAD"))
-    public void onChunkUnload(ChunkPos pos, CallbackInfo ci) {
+    public void nexus$onChunkUnload(ChunkPos pos, CallbackInfo ci) {
         NexusWorldRender render = (NexusWorldRender) Minecraft.getInstance().levelRenderer;
         if (render.builder != null) {
             render.builder.unload(pos);

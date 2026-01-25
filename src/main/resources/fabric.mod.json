@@ -1,38 +1,36 @@
 {
-	"schemaVersion": 1,
-	"id": "nexus",
-	"version": "${version}",
-	"name": "Nexus Render",
-	"description": "",
-	"authors": [
-		"Liyze09"
-	],
-	"contact": {
-
-	},
-	"license": "Apache Licence 2.0",
-	"icon": "assets/nexus/icon.png",
-	"environment": "*",
-	"entrypoints": {
-		"client": [
-			"io.github.liyze09.nexus.NexusClientMain"
-		]
-	},
-	"mixins": [
-		"nexus.mixins.json",
-		{
-			"config": "nexus.client.mixins.json",
-			"environment": "client"
-		}
-	],
-	"accessWidener" : "nexus.accesswidener",
-	"depends": {
-		"fabricloader": ">=0.17.2",
-		"minecraft": "~1.21.10",
-		"java": ">=21",
-		"fabric-api": "*"
-	},
-	"suggests": {
-
-	}
+  "schemaVersion": 1,
+  "id": "nexus",
+  "version": "${version}",
+  "name": "Nexus Render",
+  "description": "",
+  "authors": [
+    "Liyze09"
+  ],
+  "contact": {
+  },
+  "license": "Apache Licence 2.0",
+  "icon": "assets/nexus/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "client": [
+      "io.github.liyze09.nexus.NexusClientMain"
+    ]
+  },
+  "mixins": [
+    "nexus.mixins.json",
+    {
+      "config": "nexus.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "accessWidener": "nexus.accesswidener",
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "minecraft": "~1.21.11",
+    "java": ">=25",
+    "fabric-api": "*"
+  },
+  "suggests": {
+  }
 }

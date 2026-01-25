@@ -1,15 +1,11 @@
 package io.github.liyze09.nexus.render;
 
 import com.mojang.blaze3d.opengl.GlTexture;
-import com.mojang.blaze3d.opengl.GlTextureView;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.textures.TextureFormat;
+import org.jspecify.annotations.NonNull;
 import org.lwjgl.opengl.EXTSemaphore;
-import org.lwjgl.system.*;
-
-import java.nio.FloatBuffer;
-import java.util.function.LongSupplier;
 
 import static org.lwjgl.opengl.EXTMemoryObject.*;
 import static org.lwjgl.opengl.EXTMemoryObjectWin32.glImportMemoryWin32HandleEXT;
@@ -18,19 +14,16 @@ import static org.lwjgl.opengl.EXTSemaphoreWin32.*;
 import static org.lwjgl.opengl.GL30C.*;
 
 public class ExternalImageRenderer {
-    private int glTextureId;
-    private int glTextureMemoryId;
-    public GlTexture blaze3dTexture;
-    public GpuTextureView blaze3dTextureView;
-
-    private int glReadySemaphoreId;
-    private int glCompleteSemaphoreId;
-
     private final long memoryHandle;
     private final long size;
     private final long readyHandle;
     private final long completeHandle;
-
+    public GlTexture blaze3dTexture;
+    public GpuTextureView blaze3dTextureView;
+    private int glTextureId;
+    private int glTextureMemoryId;
+    private int glReadySemaphoreId;
+    private int glCompleteSemaphoreId;
     private int textureWidth = 0;
     private int textureHeight = 0;
 
@@ -86,10 +79,10 @@ public class ExternalImageRenderer {
         glTextureMemoryId = memoryObjectId;
     }
 
-    public void render(LongSupplier external) {
+    public void render(@NonNull Runnable external) {
         signalComplete();
         glFlush();
-        external.getAsLong();
+        external.run();
         waitForReadySignal();
         glFlush();
     }

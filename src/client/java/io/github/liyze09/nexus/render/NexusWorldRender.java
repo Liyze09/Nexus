@@ -1,10 +1,9 @@
 package io.github.liyze09.nexus.render;
 
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
-import com.mojang.blaze3d.framegraph.FrameGraphBuilder;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
-import io.github.liyze09.nexus.NexusClientMain;
+import io.github.NexusBackend;
 import io.github.liyze09.nexus.chunk.NexusChunkBuilder;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.minecraft.client.Camera;
@@ -40,29 +39,40 @@ import java.util.concurrent.Executor;
 
 public final class NexusWorldRender extends LevelRenderer {
     private static final Logger LOGGER = LoggerFactory.getLogger(NexusWorldRender.class);
-    @Nullable
-    private volatile ClientLevel world = null;
+    public final NexusBackend backend;
     @SuppressWarnings("unused")
     private final Minecraft minecraft;
+    public volatile NexusChunkBuilder builder = null;
+    @Nullable
+    private volatile ClientLevel world = null;
     private ExternalImageRenderer renderer;
     private volatile boolean isCompleted = true;
-    private final long nativeContext;
     private int width;
     private int height;
     private boolean rendering = false;
-    public volatile NexusChunkBuilder builder = null;
     private volatile boolean isClosed = false;
+    private ResourceManager resourceManager;
+
     public NexusWorldRender(Minecraft minecraft, EntityRenderDispatcher entityRenderDispatcher, BlockEntityRenderDispatcher blockEntityRenderDispatcher, RenderBuffers renderBuffers, LevelRenderState levelRenderState, FeatureRenderDispatcher featureRenderDispatcher) {
         super(minecraft, entityRenderDispatcher, blockEntityRenderDispatcher, renderBuffers, levelRenderState, featureRenderDispatcher);
-        this.nativeContext = NexusClientMain.initNative();
+        this.backend = new NexusBackend();
         this.minecraft = minecraft;
+        this.resourceManager = minecraft.getResourceManager();
+        reloadResources(resourceManager);
         this.width = minecraft.getWindow().getWidth();
         this.height = minecraft.getWindow().getHeight();
-        NexusClientMain.resize(nativeContext, width, height);
-        long r = NexusClientMain.getGLReady(nativeContext);
-        long c = NexusClientMain.getGLComplete(nativeContext);
-        this.renderer = new ExternalImageRenderer(r, c, NexusClientMain.getGLTexture(nativeContext), width, height, NexusClientMain.getTextureSize(nativeContext));
+        backend.resize(width, height);
+        long r = backend.getGLReady();
+        long c = backend.getGLComplete();
+        this.renderer = new ExternalImageRenderer(r, c, backend.getGLTexture(), width, height, backend.getTextureSize());
         LOGGER.info("NexusWorldRender created.");
+    }
+
+    private static void reloadResources(ResourceManager resourceManager) {
+        resourceManager.listResources("textures", (s) -> true)
+                .forEach(((resourceLocation, _) -> {
+                    System.out.println(resourceLocation);
+                }));
     }
 
     @Override
@@ -74,12 +84,13 @@ public final class NexusWorldRender extends LevelRenderer {
         }
         isClosed = true;
         renderer.cleanup();
-        // NexusClientMain.close(nativeContext);
+        // backend.close();
     }
 
     public boolean isClosed() {
         return isClosed;
     }
+
     @Nullable
     public ClientLevel getWorld() {
         return world;
@@ -92,7 +103,7 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public @NonNull CompletableFuture<Void> reload(@NonNull SharedState sharedState, @NonNull Executor executor, PreparationBarrier preparationBarrier, Executor executor2) {
+    public @NonNull CompletableFuture<Void> reload(@NonNull SharedState sharedState, @NonNull Executor executor, @NonNull PreparationBarrier preparationBarrier, @NonNull Executor executor2) {
         return super.reload(sharedState, executor, preparationBarrier, executor2);
     }
 
@@ -107,13 +118,18 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public void onResourceManagerReload(@NonNull ResourceManager resourceManager) {}
+    public void onResourceManagerReload(@NonNull ResourceManager resourceManager) {
+        this.resourceManager = resourceManager;
+        reloadResources(resourceManager);
+    }
 
     @Override
-    public void initOutline() {}
+    public void initOutline() {
+    }
 
     @Override
-    public void doEntityOutline() {}
+    public void doEntityOutline() {
+    }
 
     @Override
     protected boolean shouldShowEntityOutlines() {
@@ -138,15 +154,16 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public void allChanged() {}
+    public void allChanged() {
+    }
 
     @Override
     public void resize(int i, int j) {
         this.width = i;
         this.height = j;
-        NexusClientMain.resize(nativeContext, width, height);
+        backend.resize(width, height);
         this.renderer.cleanup();
-        this.renderer = new ExternalImageRenderer(NexusClientMain.getGLReady(nativeContext), NexusClientMain.getGLComplete(nativeContext), NexusClientMain.getGLTexture(nativeContext), width, height, NexusClientMain.getTextureSize(nativeContext));
+        this.renderer = new ExternalImageRenderer(backend.getGLReady(), backend.getGLComplete(), backend.getGLTexture(), width, height, backend.getTextureSize());
     }
 
     @Override
@@ -175,7 +192,8 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public void resetSampler() {}
+    public void resetSampler() {
+    }
 
     @Override
     public @Nullable String getEntityStatistics() {
@@ -183,13 +201,14 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public void addRecentlyCompiledSection(SectionRenderDispatcher.@NonNull RenderSection renderSection) {}
+    public void addRecentlyCompiledSection(SectionRenderDispatcher.@NonNull RenderSection renderSection) {
+    }
 
     @Override
     public void renderLevel(@NonNull GraphicsResourceAllocator graphicsResourceAllocator, @NonNull DeltaTracker deltaTracker, boolean bl, @NonNull Camera camera, @NonNull Matrix4f matrix4f, @NonNull Matrix4f matrix4f2, @NonNull Matrix4f matrix4f3, @NonNull GpuBufferSlice gpuBufferSlice, @NonNull Vector4f vector4f, boolean bl2) {
         checkIfClosed();
         this.isCompleted = false;
-        renderer.render(() -> NexusClientMain.render(nativeContext));
+        renderer.render(() -> backend.render());
         var target = this.minecraft.getMainRenderTarget();
         target.colorTexture = renderer.blaze3dTexture;
         target.colorTextureView = renderer.blaze3dTextureView;
@@ -197,25 +216,32 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public void endFrame() {}
+    public void endFrame() {
+    }
 
     @Override
-    public void captureFrustum() {}
+    public void captureFrustum() {
+    }
 
     @Override
-    public void killFrustum() {}
+    public void killFrustum() {
+    }
 
     @Override
-    public void tick(@NonNull Camera camera) {}
+    public void tick(@NonNull Camera camera) {
+    }
 
     @Override
-    public void blockChanged(@NonNull BlockGetter blockGetter, @NonNull BlockPos blockPos, @NonNull BlockState blockState, @NonNull BlockState blockState2, int i) {}
+    public void blockChanged(@NonNull BlockGetter blockGetter, @NonNull BlockPos blockPos, @NonNull BlockState blockState, @NonNull BlockState blockState2, int i) {
+    }
 
     @Override
-    public void setBlocksDirty(int i, int j, int k, int l, int m, int n) {}
+    public void setBlocksDirty(int i, int j, int k, int l, int m, int n) {
+    }
 
     @Override
-    public void setBlockDirty(@NonNull BlockPos blockPos, @NonNull BlockState blockState, @NonNull BlockState blockState2) {}
+    public void setBlockDirty(@NonNull BlockPos blockPos, @NonNull BlockState blockState, @NonNull BlockState blockState2) {
+    }
 
     @Override
     public void setSectionDirtyWithNeighbors(int i, int j, int k) {
@@ -234,7 +260,7 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public void destroyBlockProgress(int i, BlockPos blockPos, int j) {
+    public void destroyBlockProgress(int i, @NonNull BlockPos blockPos, int j) {
     }
 
     @Override
@@ -243,7 +269,7 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public void onChunkReadyToRender(ChunkPos chunkPos) {
+    public void onChunkReadyToRender(@NonNull ChunkPos chunkPos) {
     }
 
     @Override
@@ -251,7 +277,7 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public boolean isSectionCompiledAndVisible(BlockPos blockPos) {
+    public boolean isSectionCompiledAndVisible(@NonNull BlockPos blockPos) {
         return true;
     }
 
@@ -306,7 +332,7 @@ public final class NexusWorldRender extends LevelRenderer {
     }
 
     @Override
-    public Gizmos.TemporaryCollection collectPerFrameGizmos() {
+    public Gizmos.@NonNull TemporaryCollection collectPerFrameGizmos() {
         return super.collectPerFrameGizmos();
     }
 }

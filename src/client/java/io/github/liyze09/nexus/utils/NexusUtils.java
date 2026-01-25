@@ -12,6 +12,7 @@ public final class NexusUtils {
     public NexusUtils() {
         throw new UnsupportedOperationException("Utility class");
     }
+
     @Contract("_, _ -> new")
     public static @NotNull AABB getInflatedAABB(@NotNull VoxelShape shape, double d) {
         return new AABB(

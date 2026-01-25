@@ -21,6 +21,7 @@ public class LayeredBlockGetter implements BlockGetter {
     private LevelChunkSection section;
     private BlockPos origin;
     private BlockPos end;
+
     public LayeredBlockGetter(@NotNull Level world, @NotNull LevelChunk chunk, @NotNull LevelChunkSection section, int sectionIndex) {
         this.world = world;
         this.section = section;
@@ -39,6 +40,7 @@ public class LayeredBlockGetter implements BlockGetter {
         this.origin = SectionPos.of(chunk.getPos(), sectionIndex).origin();
         this.end = this.origin.offset(15, 15, 15);
     }
+
     @Override
     public @Nullable BlockEntity getBlockEntity(@NonNull BlockPos blockPos) {
         if (inChunk(blockPos, chunk)) {

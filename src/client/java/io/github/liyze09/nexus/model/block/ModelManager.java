@@ -7,13 +7,16 @@ import java.util.HashMap;
 
 public class ModelManager {
     private static final ModelManager instance = new ModelManager();
-    public static ModelManager getInstance() {
-        return instance;
-    }
     public HashMap<BlockState, Model> map = new HashMap<>();
+
     private ModelManager() {
         // TODO: load models
     }
+
+    public static ModelManager getInstance() {
+        return instance;
+    }
+
     @NotNull
     public Model getModel(BlockState state) {
         return map.getOrDefault(state, BoundingBox.INSTANCE);

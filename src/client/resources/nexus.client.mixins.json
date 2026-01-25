@@ -6,8 +6,11 @@
     "defaultRequire": 1
   },
   "client": [
-    "client.ClientChunkCacheMixin",
     "client.DMixinWindow",
-    "client.MinecraftMixin"
+    "client.MinecraftMixin",
+    "client.MixinClientChunkCache",
+    "client.accessor.TextureAtlasAccessor",
+    "client.resource.MixinDirectoryLister",
+    "client.resource.MixinTextureAtlas"
   ]
 }

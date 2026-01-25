@@ -1,12 +1,13 @@
 package io.github.liyze09.nexus.model.block;
 
-import java.util.ArrayList;
-
 import io.github.liyze09.nexus.utils.VkPos;
 import net.minecraft.world.phys.AABB;
 
+import java.util.ArrayList;
+
 public class BoundingBox implements Model {
     public static final BoundingBox INSTANCE = new BoundingBox();
+
     @Override
     public ArrayList<AABB> getAABB(VisibleFaces faces, VkPos pos, float depth) {
         var aabbs = new ArrayList<AABB>();
