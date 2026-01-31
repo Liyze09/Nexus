@@ -1,6 +1,6 @@
 package io.github.liyze09.nexus.mixin.client;
 
-import io.github.liyze09.nexus.render.NexusWorldRender;
+import io.github.liyze09.nexus.render.NexusWorldRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.network.FriendlyByteBuf;
@@ -19,10 +19,10 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 @Mixin(ClientChunkCache.class)
-public class MixinClientChunkCache {
+public abstract class MixinClientChunkCache {
     @Inject(method = "updateViewRadius", at = @At("TAIL"))
     public void nexus$onViewRadiusChanged(int i, CallbackInfo ci) {
-        NexusWorldRender render = (NexusWorldRender) Minecraft.getInstance().levelRenderer;
+        NexusWorldRenderer render = (NexusWorldRenderer) Minecraft.getInstance().levelRenderer;
         if (render.builder != null && render.getWorld() != null) {
             render.builder.rebuild(Objects.requireNonNull(render.getWorld()));
         } else {
@@ -33,7 +33,7 @@ public class MixinClientChunkCache {
 
     @Inject(method = "replaceWithPacketData", at = @At("RETURN"))
     public void nexus$onUpdateChunk(int i, int j, FriendlyByteBuf friendlyByteBuf, Map<Heightmap.Types, long[]> map, Consumer<ClientboundLevelChunkPacketData.BlockEntityTagOutput> consumer, CallbackInfoReturnable<LevelChunk> cir) {
-        NexusWorldRender render = (NexusWorldRender) Minecraft.getInstance().levelRenderer;
+        NexusWorldRenderer render = (NexusWorldRenderer) Minecraft.getInstance().levelRenderer;
         if (render.builder != null) {
             render.builder.load(cir.getReturnValue());
         }
@@ -41,7 +41,7 @@ public class MixinClientChunkCache {
 
     @Inject(method = "drop", at = @At("HEAD"))
     public void nexus$onChunkUnload(ChunkPos pos, CallbackInfo ci) {
-        NexusWorldRender render = (NexusWorldRender) Minecraft.getInstance().levelRenderer;
+        NexusWorldRenderer render = (NexusWorldRenderer) Minecraft.getInstance().levelRenderer;
         if (render.builder != null) {
             render.builder.unload(pos);
         }

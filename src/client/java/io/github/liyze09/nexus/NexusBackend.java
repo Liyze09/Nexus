@@ -1,13 +1,16 @@
-package io.github;
+package io.github.liyze09.nexus;
 
-import io.github.liyze09.nexus.NexusClientMain;
+import io.github.liyze09.nexus.resource.SharedTextureManager;
+
+import java.io.Closeable;
 
 /**
  * Instantiating class that wraps Nexus JNI methods.
  * Manages the lifecycle of native Vulkan context.
  */
-public class NexusBackend implements AutoCloseable {
+public class NexusBackend implements Closeable {
     private final long nativeContext;
+    public final SharedTextureManager sharedTextureManager = new SharedTextureManager();
     private boolean closed = false;
 
     /**
@@ -19,7 +22,7 @@ public class NexusBackend implements AutoCloseable {
     }
 
     /**
-     * Performs rendering operation.
+     * Queues rendering operation.
      */
     public void render() {
         checkClosed();
@@ -121,6 +124,28 @@ public class NexusBackend implements AutoCloseable {
         if (closed) {
             throw new IllegalStateException("NexusBackend instance is closed");
         }
+    }
+
+    public void syncAtlas(
+        long textureHandle,
+        String atlasName,
+        String[] spriteNames,
+        int[] spriteX, int[] spriteY,
+        int[] spriteWidth, int[] spriteHeight,
+        float[] spriteU0, float[] spriteV0,
+        float[] spriteU1, float[] spriteV1
+    ) {
+        checkClosed();
+        NexusClientMain.syncAtlas(
+            nativeContext,
+            textureHandle,
+            atlasName,
+            spriteNames,
+            spriteX, spriteY,
+            spriteWidth, spriteHeight,
+            spriteU0, spriteV0,
+            spriteU1, spriteV1
+        );
     }
 
     /**

@@ -1,6 +1,6 @@
 package io.github.liyze09.nexus.mixin.client;
 
-import io.github.liyze09.nexus.render.NexusWorldRender;
+import io.github.liyze09.nexus.render.NexusWorldRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
 import org.objectweb.asm.Opcodes;
@@ -17,7 +17,7 @@ public abstract class MinecraftMixin {
                     opcode = Opcodes.PUTFIELD
             ))
     public void nexus$init(Minecraft instance, LevelRenderer value) {
-        instance.levelRenderer = new NexusWorldRender(instance,
+        instance.levelRenderer = new NexusWorldRenderer(instance,
                 instance.getEntityRenderDispatcher(),
                 instance.getBlockEntityRenderDispatcher(),
                 instance.renderBuffers,

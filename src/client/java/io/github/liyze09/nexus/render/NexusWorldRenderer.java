@@ -3,7 +3,7 @@ package io.github.liyze09.nexus.render;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
-import io.github.NexusBackend;
+import io.github.liyze09.nexus.NexusBackend;
 import io.github.liyze09.nexus.chunk.NexusChunkBuilder;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.minecraft.client.Camera;
@@ -37,10 +37,9 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
-public final class NexusWorldRender extends LevelRenderer {
-    private static final Logger LOGGER = LoggerFactory.getLogger(NexusWorldRender.class);
+public final class NexusWorldRenderer extends LevelRenderer {
+    private static final Logger LOGGER = LoggerFactory.getLogger(NexusWorldRenderer.class);
     public final NexusBackend backend;
-    @SuppressWarnings("unused")
     private final Minecraft minecraft;
     public volatile NexusChunkBuilder builder = null;
     @Nullable
@@ -53,26 +52,23 @@ public final class NexusWorldRender extends LevelRenderer {
     private volatile boolean isClosed = false;
     private ResourceManager resourceManager;
 
-    public NexusWorldRender(Minecraft minecraft, EntityRenderDispatcher entityRenderDispatcher, BlockEntityRenderDispatcher blockEntityRenderDispatcher, RenderBuffers renderBuffers, LevelRenderState levelRenderState, FeatureRenderDispatcher featureRenderDispatcher) {
+    public NexusWorldRenderer(Minecraft minecraft, EntityRenderDispatcher entityRenderDispatcher, BlockEntityRenderDispatcher blockEntityRenderDispatcher, RenderBuffers renderBuffers, LevelRenderState levelRenderState, FeatureRenderDispatcher featureRenderDispatcher) {
         super(minecraft, entityRenderDispatcher, blockEntityRenderDispatcher, renderBuffers, levelRenderState, featureRenderDispatcher);
         this.backend = new NexusBackend();
         this.minecraft = minecraft;
         this.resourceManager = minecraft.getResourceManager();
-        reloadResources(resourceManager);
+        reloadResources(resourceManager, backend);
         this.width = minecraft.getWindow().getWidth();
         this.height = minecraft.getWindow().getHeight();
         backend.resize(width, height);
         long r = backend.getGLReady();
         long c = backend.getGLComplete();
         this.renderer = new ExternalImageRenderer(r, c, backend.getGLTexture(), width, height, backend.getTextureSize());
-        LOGGER.info("NexusWorldRender created.");
+        LOGGER.info("NexusWorldRenderer created.");
     }
 
-    private static void reloadResources(ResourceManager resourceManager) {
-        resourceManager.listResources("textures", (s) -> true)
-                .forEach(((resourceLocation, _) -> {
-                    System.out.println(resourceLocation);
-                }));
+    private static void reloadResources(ResourceManager resourceManager, NexusBackend backend) {
+
     }
 
     @Override
@@ -120,7 +116,7 @@ public final class NexusWorldRender extends LevelRenderer {
     @Override
     public void onResourceManagerReload(@NonNull ResourceManager resourceManager) {
         this.resourceManager = resourceManager;
-        reloadResources(resourceManager);
+        reloadResources(resourceManager, backend);
     }
 
     @Override
@@ -208,7 +204,7 @@ public final class NexusWorldRender extends LevelRenderer {
     public void renderLevel(@NonNull GraphicsResourceAllocator graphicsResourceAllocator, @NonNull DeltaTracker deltaTracker, boolean bl, @NonNull Camera camera, @NonNull Matrix4f matrix4f, @NonNull Matrix4f matrix4f2, @NonNull Matrix4f matrix4f3, @NonNull GpuBufferSlice gpuBufferSlice, @NonNull Vector4f vector4f, boolean bl2) {
         checkIfClosed();
         this.isCompleted = false;
-        renderer.render(() -> backend.render());
+        renderer.render(backend::render);
         var target = this.minecraft.getMainRenderTarget();
         target.colorTexture = renderer.blaze3dTexture;
         target.colorTextureView = renderer.blaze3dTextureView;

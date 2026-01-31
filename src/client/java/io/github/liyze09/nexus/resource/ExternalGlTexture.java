@@ -1,9 +1,11 @@
 package io.github.liyze09.nexus.resource;
 
+import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.opengl.GlTexture;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.TextureFormat;
-import io.github.NexusBackend;
+import io.github.liyze09.nexus.NexusBackend;
+import io.github.liyze09.nexus.mixin.client.accessor.GlTextureAccessor;
 
 import static org.lwjgl.opengl.EXTMemoryObject.*;
 import static org.lwjgl.opengl.EXTMemoryObjectWin32.*;
@@ -77,10 +79,25 @@ public class ExternalGlTexture extends GlTexture {
 
     @Override
     public void close() {
-        if (memoryObjectId != 0) {
-            glDeleteMemoryObjectsEXT(memoryObjectId);
-            memoryObjectId = 0;
+        if (!super.closed) {
+            super.closed = true;
+            var accessor = (GlTextureAccessor) this;
+            if (accessor.getViews() == 0) {
+                if (memoryObjectId != 0) {
+                    glDeleteMemoryObjectsEXT(memoryObjectId);
+                    GlStateManager._deleteTexture(this.id);
+                    if (accessor.getFirstFboId() != -1) {
+                        GlStateManager._glDeleteFramebuffers(accessor.getFirstFboId());
+                    }
+
+                    if (accessor.getFboCache() != null) {
+                        for (int i : accessor.getFboCache().values()) {
+                            GlStateManager._glDeleteFramebuffers(i);
+                        }
+                    }
+                    memoryObjectId = 0;
+                }
+            }
         }
-        super.close();
     }
 }

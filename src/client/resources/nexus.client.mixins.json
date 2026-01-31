@@ -9,7 +9,7 @@
     "client.DMixinWindow",
     "client.MinecraftMixin",
     "client.MixinClientChunkCache",
-    "client.accessor.TextureAtlasAccessor",
+    "client.accessor.GlTextureAccessor",
     "client.resource.MixinDirectoryLister",
     "client.resource.MixinTextureAtlas"
   ]

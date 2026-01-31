@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Window.class)
-public class DMixinWindow {
+public abstract class DMixinWindow {
     @Inject(
             method = "<init>",
             at = @At(

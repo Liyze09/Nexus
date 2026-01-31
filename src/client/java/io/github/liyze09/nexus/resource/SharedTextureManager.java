@@ -1,27 +1,29 @@
 package io.github.liyze09.nexus.resource;
 
-import com.mojang.blaze3d.textures.GpuTextureView;
+import com.google.common.collect.ImmutableList;
+import com.mojang.blaze3d.textures.GpuTexture;
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import net.minecraft.resources.Identifier;
 
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class SharedTextureManager {
-    private final ConcurrentHashMap<Identifier, GpuTextureView[]> textures = new ConcurrentHashMap<>();
-
-    public void addTexture(Identifier identifier, GpuTextureView[] texture) {
+    public final ConcurrentHashMap<Identifier, GpuTexture> textures = new ConcurrentHashMap<>();
+    @SuppressWarnings("null")
+    public final ImmutableList<Identifier> textureManagedByVulkan = ImmutableList.of(
+            Identifier.withDefaultNamespace("textures/atlas/blocks.png")
+    );
+    public void addTexture(Identifier identifier, GpuTexture texture) {
         textures.put(identifier, texture);
     }
 
-    public Map<Identifier, long[]> genExportedTextureIds() {
-        var ret = new HashMap<Identifier, long[]>();
+    public Object2LongMap<Identifier> genExportedTextureIds() {
+        var ret = new Object2LongOpenHashMap<Identifier>();
         textures.forEach((identifier, texture) ->
-                ret.put(identifier, Arrays.stream(texture).mapToLong(
-                        textureView ->
-                                ((ExternalGlTexture) textureView.texture()).handle
-                ).toArray())
+                ret.put(identifier,
+                        ((ExternalGlTexture) texture).handle
+                )
         );
         return ret;
     }

@@ -3,6 +3,7 @@ use anyhow::{Error, Result, anyhow};
 use ash::khr::ray_tracing_pipeline;
 use ash::vk::{ExternalMemoryHandleTypeFlags, HANDLE, MemoryGetWin32HandleInfoKHR};
 use dashmap::DashMap;
+use std::collections::HashMap;
 use rayon::prelude::*;
 use smallvec::smallvec;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,6 +48,7 @@ use vulkano::{DeviceSize, NonExhaustive, Version, VulkanLibrary, VulkanObject};
 use windows_sys::Win32::Foundation::CloseHandle;
 
 use crate::geometry::{GeometryData, GeometryManager, GeometryType};
+use crate::texture::AtlasManager;
 
 #[derive(Clone)]
 pub struct VkBackend {
@@ -62,6 +64,7 @@ pub struct VkBackend {
     geometry_manager: Arc<GeometryManager>,
     host_subbuffer_alloc: Arc<Mutex<SubbufferAllocator>>,
     exported_textures: Arc<DashMap<HANDLE, ExportedImage>>,
+    atlas_manager: Arc<AtlasManager>,
 }
 
 impl VkBackend {
@@ -240,6 +243,7 @@ impl VkBackend {
                 },
             ))),
             exported_textures: Arc::new(DashMap::new()),
+            atlas_manager: Arc::new(AtlasManager::new()),
         })
     }
 
@@ -447,18 +451,43 @@ impl VkBackend {
                 image_view: None,
                 memory: device_memory.clone(),
                 handle,
-                size
+                size,
             },
         );
         Ok((image, size, device_memory, handle))
     }
 
     pub fn get_texture_size_by_handle(&self, handle: HANDLE) -> Result<DeviceSize> {
-        let exported_texture = self.exported_textures
+        let exported_texture = self
+            .exported_textures
             .get(&handle)
             .ok_or_else(|| anyhow!("Texture with handle {:?} not found", handle))?;
 
         Ok(exported_texture.size)
+    }
+
+    pub fn get_exported_image_by_handle(&self, handle: HANDLE) -> Result<ExportedImage> {
+        let exported_texture = self
+            .exported_textures
+            .get(&handle)
+            .ok_or_else(|| anyhow!("Texture with handle {:?} not found", handle))?;
+
+        Ok(exported_texture.clone())
+    }
+
+    /// Synchronize atlas information with sprite mappings
+    pub fn sync_atlas(
+        &self,
+        texture: Arc<Image>,
+        atlas_name: String,
+        sprites: HashMap<String, crate::texture::SpriteInfo>,
+    ) {
+        self.atlas_manager.sync_atlas(texture, atlas_name, sprites);
+    }
+
+    /// Get the atlas manager for external access
+    pub fn atlas_manager(&self) -> Arc<AtlasManager> {
+        self.atlas_manager.clone()
     }
 }
 
@@ -686,7 +715,7 @@ pub struct ExportedImage {
     pub image_view: Option<Arc<ImageView>>,
     pub memory: Arc<DeviceMemory>,
     pub handle: HANDLE,
-    pub size: DeviceSize
+    pub size: DeviceSize,
 }
 
 pub struct DeviceProperties {
