@@ -46,6 +46,9 @@ public class NexusClientMain implements ClientModInitializer {
                                         float[] spriteU0, float[] spriteV0,
                                         float[] spriteU1, float[] spriteV1);
 
+    public static native void uploadChunkMesh(long ctx, int chunkX, int chunkZ,
+                                              float[] vertices, int[] indices);
+
     @Override
     public void onInitializeClient() {
 

@@ -148,6 +148,22 @@ public class NexusBackend implements Closeable {
         );
     }
 
+    public void uploadChunkMesh(
+        int chunkX,
+        int chunkZ,
+        float[] vertices,
+        int[] indices
+    ) {
+        checkClosed();
+        NexusClientMain.uploadChunkMesh(
+            nativeContext,
+            chunkX,
+            chunkZ,
+            vertices,
+            indices
+        );
+    }
+
     /**
      * Gets the underlying native context handle (for advanced use cases).
      *

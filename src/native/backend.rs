@@ -1,11 +1,11 @@
 #![allow(dead_code, unused)]
-use anyhow::{Error, Result, anyhow};
+use anyhow::{anyhow, Error, Result};
 use ash::khr::ray_tracing_pipeline;
-use ash::vk::{ExternalMemoryHandleTypeFlags, HANDLE, MemoryGetWin32HandleInfoKHR};
+use ash::vk::{ExternalMemoryHandleTypeFlags, MemoryGetWin32HandleInfoKHR, HANDLE};
 use dashmap::DashMap;
-use std::collections::HashMap;
 use rayon::prelude::*;
 use smallvec::smallvec;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::thread;
@@ -55,6 +55,7 @@ pub struct VkBackend {
     raw: Raw,
     queues: Queues,
     device: Arc<Device>,
+    device_properties: DeviceProperties,
     memory_allocator: Arc<StandardMemoryAllocator>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     size: Arc<RwLock<(u32, u32)>>,
@@ -208,6 +209,7 @@ impl VkBackend {
             raw,
             queues,
             device,
+            device_properties,
             memory_allocator: memory_allocator.clone(),
             command_buffer_allocator,
             size: Arc::new(RwLock::new((0, 0))),
@@ -271,7 +273,7 @@ impl VkBackend {
             })?
             .end_rendering()?*/;
         let command_buffer = builder.build()?;
-        let fence = Arc::new(Fence::from_pool(self.device())?);
+        let fence = Arc::new(Fence::from_pool(self.device().clone())?);
         self.queues.graphics.with(|mut queue| -> Result<()> {
             unsafe {
                 Ok(queue.submit(
@@ -293,6 +295,18 @@ impl VkBackend {
     }
 
     pub fn build_acceleration_structure(&self, geometry_data: GeometryData) -> u64 {
+        self.geometry_manager.add_temporary_geometry(geometry_data)
+    }
+
+    pub fn upload_chunk_mesh(
+        &self,
+        chunk_x: i32,
+        chunk_z: i32,
+        geometry_data: GeometryData,
+    ) -> u64 {
+        // TODO: Implement proper meshopt optimization
+        // TODO: Upload optimized data as StorageBuffer for Mesh Shader
+        // For now, just pass through to geometry manager
         self.geometry_manager.add_temporary_geometry(geometry_data)
     }
 
@@ -326,48 +340,53 @@ impl VkBackend {
     }
 
     #[inline]
-    pub fn target(&self) -> RenderTargetWrapper {
-        self.render_target.clone()
+    pub fn target(&self) -> &RenderTargetWrapper {
+        &self.render_target
     }
 
     #[inline]
-    pub fn semaphore(&self) -> SharedSemaphore {
-        self.semaphore.clone()
+    pub fn semaphore(&self) -> &SharedSemaphore {
+        &self.semaphore
     }
 
     #[inline]
-    pub fn queue(&self) -> Queues {
-        self.queues.clone()
+    pub fn queue(&self) -> &Queues {
+        &self.queues
     }
 
     #[inline]
-    pub fn memory_allocator(&self) -> Arc<StandardMemoryAllocator> {
-        self.memory_allocator.clone()
+    pub fn memory_allocator(&self) -> &Arc<StandardMemoryAllocator> {
+        &self.memory_allocator
     }
 
     #[inline]
-    pub fn command_buffer_allocator(&self) -> Arc<StandardCommandBufferAllocator> {
-        self.command_buffer_allocator.clone()
+    pub fn command_buffer_allocator(&self) -> &Arc<StandardCommandBufferAllocator> {
+        &self.command_buffer_allocator
     }
 
     #[inline]
-    pub fn device(&self) -> Arc<Device> {
-        self.device.clone()
+    pub fn device(&self) -> &Arc<Device> {
+        &self.device
     }
 
     #[inline]
-    pub fn physical_device(&self) -> Arc<PhysicalDevice> {
-        self.device.physical_device().clone()
+    pub fn physical_device(&self) -> &Arc<PhysicalDevice> {
+        self.device.physical_device()
     }
 
     #[inline]
-    pub fn instance(&self) -> Arc<Instance> {
-        self.device.instance().clone()
+    pub fn instance(&self) -> &Arc<Instance> {
+        self.device.instance()
+    }
+
+    #[inline]
+    pub fn device_properties(&self) -> &DeviceProperties {
+        &self.device_properties
     }
 
     pub fn transfer_data<L, D: BufferContents + Copy>(
         &self,
-        data: &Vec<D>,
+        data: &[D],
         target: Subbuffer<[D]>,
         command_buffer: &mut AutoCommandBufferBuilder<L>,
     ) -> Result<Subbuffer<[D]>> {
@@ -591,7 +610,7 @@ impl Queues {
             let props = queue.device().physical_device().queue_family_properties()
                 [queue.queue_family_index() as usize]
                 .clone();
-            let index = queue.queue_family_index().clone();
+            let index = queue.queue_family_index();
             queue_infos.push((queue, props.queue_flags, index));
         }
 
@@ -606,12 +625,14 @@ impl Queues {
         }
 
         for (queue, flags, family_index) in &queue_infos {
-            if flags.contains(QueueFlags::COMPUTE) && compute.is_none() {
-                if !flags.contains(QueueFlags::GRAPHICS) && !used_families.contains(family_index) {
-                    compute = Some(queue.clone());
-                    used_families.push(*family_index);
-                    break;
-                }
+            if flags.contains(QueueFlags::COMPUTE)
+                && compute.is_none()
+                && !flags.contains(QueueFlags::GRAPHICS)
+                && !used_families.contains(family_index)
+            {
+                compute = Some(queue.clone());
+                used_families.push(*family_index);
+                break;
             }
         }
 
@@ -628,15 +649,15 @@ impl Queues {
         }
 
         for (queue, flags, family_index) in &queue_infos {
-            if flags.contains(QueueFlags::TRANSFER) && transfer.is_none() {
-                if !flags.contains(QueueFlags::GRAPHICS)
-                    && !flags.contains(QueueFlags::COMPUTE)
-                    && !used_families.contains(family_index)
-                {
-                    transfer = Some(queue.clone());
-                    used_families.push(*family_index);
-                    break;
-                }
+            if flags.contains(QueueFlags::TRANSFER)
+                && transfer.is_none()
+                && !flags.contains(QueueFlags::GRAPHICS)
+                && !flags.contains(QueueFlags::COMPUTE)
+                && !used_families.contains(family_index)
+            {
+                transfer = Some(queue.clone());
+                used_families.push(*family_index);
+                break;
             }
         }
 
@@ -655,7 +676,7 @@ impl Queues {
         Ok(Queues {
             graphics: graphics.clone(),
             compute: compute.ok_or(anyhow!("no compute queue found"))?.clone(),
-            transfer: transfer.unwrap_or_else(|| graphics).clone(),
+            transfer: transfer.unwrap_or(graphics).clone(),
         })
     }
 }
@@ -681,6 +702,7 @@ impl RenderTargetWrapper {
         }
         Ok(())
     }
+
     pub fn get_value(&self) -> Result<RenderTarget> {
         self.0
             .read()
@@ -718,8 +740,9 @@ pub struct ExportedImage {
     pub size: DeviceSize,
 }
 
+#[derive(Clone)]
 pub struct DeviceProperties {
-    graphics: bool,
-    ray_trace: bool,
-    score: u32,
+    pub graphics: bool,
+    pub ray_trace: bool,
+    pub score: u32,
 }

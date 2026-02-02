@@ -1,6 +1,6 @@
 package io.github.liyze09.nexus.chunk;
 
-import io.github.liyze09.nexus.NexusClientMain;
+import io.github.liyze09.nexus.NexusBackend;
 import io.github.liyze09.nexus.model.block.Mesh;
 import io.github.liyze09.nexus.model.block.Model;
 import io.github.liyze09.nexus.model.block.ModelManager;
@@ -15,16 +15,13 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Closeable;
 import java.lang.foreign.Arena;
-import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Optional;
@@ -35,13 +32,15 @@ public class NexusChunkBuilder implements Closeable {
     final Arena arena = Arena.ofShared();
     final Map<ChunkPos, LevelChunk> loadedChunks;
     final Map<ChunkPos, BuiltChunk> builtChunks;
+    final NexusBackend backend;
     ClientLevel world;
     AtomicReferenceArray<LevelChunk> chunks;
     Camera camera;
     CollisionContext collisionContext = CollisionContext.empty();
 
-    public NexusChunkBuilder(@NotNull ClientLevel world) {
+    public NexusChunkBuilder(@NotNull ClientLevel world, @NotNull NexusBackend backend) {
         this.world = world;
+        this.backend = backend;
         this.chunks = world.getChunkSource().storage.chunks;
         this.loadedChunks = new ConcurrentHashMap<>(chunks.length());
         this.builtChunks = new ConcurrentHashMap<>(chunks.length());
@@ -93,10 +92,12 @@ public class NexusChunkBuilder implements Closeable {
             return;
         }
         ModelManager modelManager = ModelManager.getInstance();
-        BuiltChunk builtChunk = new BuiltChunk();
         LayeredBlockGetter blockGetter = new LayeredBlockGetter(world, chunk);
-        ArrayList<Mesh> meshes = new ArrayList<>();
-        ArrayList<AABB> aabbs = new ArrayList<>();
+        ArrayList<Float> verticesList = new ArrayList<>();
+        ArrayList<Integer> indicesList = new ArrayList<>();
+
+        int vertexOffset = 0;
+
         for (int i = 0; i < chunk.getSections().length; i++) {
             LevelChunkSection section = chunk.getSections()[i];
             if (section.hasOnlyAir()) {
@@ -136,30 +137,39 @@ public class NexusChunkBuilder implements Closeable {
                         pos.getZ() & 15
                 );
                 Optional<Mesh> mesh = model.getMesh(faces, pos1);
-                mesh.ifPresent(meshes::add);
-                var aabb = model.getAABB(faces, pos1, NexusClientMain.config.parallax_depth);
-                aabbs.addAll(aabb);
+                if (mesh.isPresent()) {
+                    Mesh m = mesh.get();
+                    // Add vertices
+                    for (float vertex : m.vertices) {
+                        verticesList.add(vertex);
+                    }
+                    // Add indices with offset
+                    for (int index : m.indices) {
+                        indicesList.add(index + vertexOffset);
+                    }
+                    // Update vertex offset for next mesh
+                    vertexOffset += m.vertices.length / 3; // Each vertex has 3 components (x, y, z)
+                }
             }
         }
 
-        if (!aabbs.isEmpty()) {
-            var layout = MemoryLayout.sequenceLayout(
-                    aabbs.size() * 6L,
-                    ValueLayout.JAVA_FLOAT
-            );
-            MemorySegment segment_aabb = arena.allocate(layout);
-            for (int j = 0; j < aabbs.size(); j++) {
-                var aabb1 = aabbs.get(j);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L, (float) aabb1.minX);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 1, (float) aabb1.minY);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 2, (float) aabb1.minZ);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 3, (float) aabb1.maxX);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 4, (float) aabb1.maxY);
-                segment_aabb.setAtIndex(ValueLayout.JAVA_FLOAT, j * 6L + 5, (float) aabb1.maxZ);
-            }
-            builtChunk.segmentAABB = segment_aabb;
+        // Convert lists to arrays
+        float[] vertices = new float[verticesList.size()];
+        for (int j = 0; j < verticesList.size(); j++) {
+            vertices[j] = verticesList.get(j);
+        }
+        int[] indices = new int[indicesList.size()];
+        for (int j = 0; j < indicesList.size(); j++) {
+            indices[j] = indicesList.get(j);
         }
 
+        // Upload mesh data to Rust backend
+        if (vertices.length > 0 && indices.length > 0) {
+            backend.uploadChunkMesh(chunkPos.x, chunkPos.z, vertices, indices);
+        }
+
+        // Still create a built chunk for compatibility (empty for now)
+        BuiltChunk builtChunk = new BuiltChunk();
         builtChunks.put(chunkPos, builtChunk);
     }
 

@@ -19,6 +19,6 @@ public class ModelManager {
 
     @NotNull
     public Model getModel(BlockState state) {
-        return map.getOrDefault(state, BoundingBox.INSTANCE);
+        return map.getOrDefault(state, CubeModel.INSTANCE);
     }
 }

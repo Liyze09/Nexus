@@ -1,17 +1,17 @@
 pub mod backend;
-pub mod shader;
 pub mod geometry;
+pub mod shader;
 pub mod texture;
 
-use std::sync::Arc;
-use std::collections::HashMap;
 use crate::backend::VkBackend;
 use ash::vk::HANDLE;
-use jni::objects::{JClass, JString, JObjectArray, JIntArray, JFloatArray};
+use jni::objects::ReleaseMode;
+use jni::objects::{JClass, JFloatArray, JIntArray, JObjectArray, JString};
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
-use jni::objects::ReleaseMode;
 use mimalloc::MiMalloc;
+use std::collections::HashMap;
+use std::sync::Arc;
 use vulkano::image::ImageUsage;
 
 #[global_allocator]
@@ -60,7 +60,7 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_getTextureSize<'
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-extern "system" fn  Java_io_github_liyze09_nexus_NexusClientMain_getGLReady<'local>(
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_getGLReady<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     ctx: jlong,
@@ -71,7 +71,7 @@ extern "system" fn  Java_io_github_liyze09_nexus_NexusClientMain_getGLReady<'loc
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-extern "system" fn  Java_io_github_liyze09_nexus_NexusClientMain_getGLComplete<'local>(
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_getGLComplete<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     ctx: jlong,
@@ -104,13 +104,13 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_resize<'local>(
     let renderer = unsafe { load_context(ctx) };
     renderer.resize((width as u32, height as u32));
     match renderer.update() {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(err) => {
             env.throw_new(
                 String::from("io/github/liyze09/nexus/exception/VulkanException"),
                 err.to_string(),
             )
-                .unwrap();
+            .unwrap();
         }
     }
 }
@@ -124,13 +124,13 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_render<'local>(
 ) {
     let renderer = unsafe { load_context(ctx) };
     match renderer.render() {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(err) => {
             env.throw_new(
                 String::from("io/github/liyze09/nexus/exception/VulkanException"),
                 err.to_string(),
             )
-                .unwrap();
+            .unwrap();
         }
     }
 }
@@ -168,9 +168,15 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_acquireVulkanTex
 ) -> jlong {
     let renderer = unsafe { load_context(ctx) };
     match renderer.create_external_texture(
-        ImageUsage::SAMPLED | ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC | ImageUsage::COLOR_ATTACHMENT | ImageUsage::STORAGE | ImageUsage::INPUT_ATTACHMENT,
+        ImageUsage::SAMPLED
+            | ImageUsage::TRANSFER_DST
+            | ImageUsage::TRANSFER_SRC
+            | ImageUsage::COLOR_ATTACHMENT
+            | ImageUsage::STORAGE
+            | ImageUsage::INPUT_ATTACHMENT,
         (width as u32, height as u32),
-        mip_levels as u32) {
+        mip_levels as u32,
+    ) {
         Ok(target) => target.3 as i64 as jlong,
         Err(err) => {
             env.throw_new(
@@ -230,7 +236,8 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_syncAtlas<'local
         env.throw_new(
             String::from("java/lang/IllegalArgumentException"),
             msg.to_string(),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Convert Java string to Rust string
@@ -246,7 +253,10 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_syncAtlas<'local
     let len = match env.get_array_length(&sprite_names) {
         Ok(len) => len,
         Err(err) => {
-            throw_and_return(&mut env, &format!("Failed to get sprite names length: {}", err));
+            throw_and_return(
+                &mut env,
+                &format!("Failed to get sprite names length: {}", err),
+            );
             return;
         }
     };
@@ -256,11 +266,17 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_syncAtlas<'local
         match env.get_array_length(array) {
             Ok(array_len) if array_len == len => true,
             Ok(array_len) => {
-                throw_and_return(env, &format!("Array {} has length {}, expected {}", name, array_len, len));
+                throw_and_return(
+                    env,
+                    &format!("Array {} has length {}, expected {}", name, array_len, len),
+                );
                 false
             }
             Err(err) => {
-                throw_and_return(env, &format!("Failed to get array {} length: {}", name, err));
+                throw_and_return(
+                    env,
+                    &format!("Failed to get array {} length: {}", name, err),
+                );
                 false
             }
         }
@@ -270,24 +286,31 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_syncAtlas<'local
         match env.get_array_length(array) {
             Ok(array_len) if array_len == len => true,
             Ok(array_len) => {
-                throw_and_return(env, &format!("Array {} has length {}, expected {}", name, array_len, len));
+                throw_and_return(
+                    env,
+                    &format!("Array {} has length {}, expected {}", name, array_len, len),
+                );
                 false
             }
             Err(err) => {
-                throw_and_return(env, &format!("Failed to get array {} length: {}", name, err));
+                throw_and_return(
+                    env,
+                    &format!("Failed to get array {} length: {}", name, err),
+                );
                 false
             }
         }
     };
 
-    if !check_len(&mut env, &sprite_x, "sprite_x") ||
-       !check_len(&mut env, &sprite_y, "sprite_y") ||
-       !check_len(&mut env, &sprite_width, "sprite_width") ||
-       !check_len(&mut env, &sprite_height, "sprite_height") ||
-       !check_float_len(&mut env, &sprite_u0, "sprite_u0") ||
-       !check_float_len(&mut env, &sprite_v0, "sprite_v0") ||
-       !check_float_len(&mut env, &sprite_u1, "sprite_u1") ||
-       !check_float_len(&mut env, &sprite_v1, "sprite_v1") {
+    if !check_len(&mut env, &sprite_x, "sprite_x")
+        || !check_len(&mut env, &sprite_y, "sprite_y")
+        || !check_len(&mut env, &sprite_width, "sprite_width")
+        || !check_len(&mut env, &sprite_height, "sprite_height")
+        || !check_float_len(&mut env, &sprite_u0, "sprite_u0")
+        || !check_float_len(&mut env, &sprite_v0, "sprite_v0")
+        || !check_float_len(&mut env, &sprite_u1, "sprite_u1")
+        || !check_float_len(&mut env, &sprite_v1, "sprite_v1")
+    {
         return;
     }
 
@@ -295,17 +318,21 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_syncAtlas<'local
     let mut sprite_names_vec: Vec<String> = Vec::with_capacity(len as usize);
     for i in 0..len {
         match env.get_object_array_element(&sprite_names, i) {
-            Ok(jstr_obj) => {
-                match env.get_string(&jstr_obj.into()) {
-                    Ok(rust_str) => sprite_names_vec.push(rust_str.into()),
-                    Err(err) => {
-                        throw_and_return(&mut env, &format!("Failed to get sprite name at index {}: {}", i, err));
-                        return;
-                    }
+            Ok(jstr_obj) => match env.get_string(&jstr_obj.into()) {
+                Ok(rust_str) => sprite_names_vec.push(rust_str.into()),
+                Err(err) => {
+                    throw_and_return(
+                        &mut env,
+                        &format!("Failed to get sprite name at index {}: {}", i, err),
+                    );
+                    return;
                 }
-            }
+            },
             Err(err) => {
-                throw_and_return(&mut env, &format!("Failed to get sprite name object at index {}: {}", i, err));
+                throw_and_return(
+                    &mut env,
+                    &format!("Failed to get sprite name object at index {}: {}", i, err),
+                );
                 return;
             }
         }
@@ -316,11 +343,14 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_syncAtlas<'local
         // Use ReleaseMode::NoCopyBack since we only read the data
         match unsafe { env.get_array_elements(array, ReleaseMode::NoCopyBack) } {
             Ok(elements) => {
-                let vec: Vec<i32> = elements.iter().map(|&x| x).collect();
+                let vec: Vec<i32> = elements.iter().copied().collect();
                 Some(vec)
             }
             Err(err) => {
-                throw_and_return(env, &format!("Failed to get {} array elements: {}", name, err));
+                throw_and_return(
+                    env,
+                    &format!("Failed to get {} array elements: {}", name, err),
+                );
                 None
             }
         }
@@ -330,11 +360,14 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_syncAtlas<'local
         // Use ReleaseMode::NoCopyBack since we only read the data
         match unsafe { env.get_array_elements(array, ReleaseMode::NoCopyBack) } {
             Ok(elements) => {
-                let vec: Vec<f32> = elements.iter().map(|&x| x).collect();
+                let vec: Vec<f32> = elements.iter().copied().collect();
                 Some(vec)
             }
             Err(err) => {
-                throw_and_return(env, &format!("Failed to get {} array elements: {}", name, err));
+                throw_and_return(
+                    env,
+                    &format!("Failed to get {} array elements: {}", name, err),
+                );
                 None
             }
         }
@@ -391,13 +424,127 @@ extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_syncAtlas<'local
     }
 
     // Sync atlas with renderer
-    renderer.sync_atlas(match renderer.get_exported_image_by_handle(texture_handle as HANDLE) {
-        Ok(exported_image) => exported_image.image,
+    renderer.sync_atlas(
+        match renderer.get_exported_image_by_handle(texture_handle as HANDLE) {
+            Ok(exported_image) => exported_image.image,
+            Err(err) => {
+                throw_and_return(
+                    &mut env,
+                    &format!("Failed to get texture by handle: {}", err),
+                );
+                return;
+            }
+        },
+        atlas_name_str,
+        sprite_map,
+    );
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_liyze09_nexus_NexusClientMain_uploadChunkMesh<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    ctx: jlong,
+    chunk_x: jint,
+    chunk_z: jint,
+    vertices: JFloatArray<'local>,
+    indices: JIntArray<'local>,
+) {
+    let renderer = unsafe { load_context(ctx) };
+
+    // Helper function to throw exception and return from function
+    fn throw_and_return<'a>(env: &mut JNIEnv<'a>, msg: &str) {
+        env.throw_new(
+            String::from("java/lang/IllegalArgumentException"),
+            msg.to_string(),
+        )
+        .unwrap();
+    }
+
+    // Get vertices array length
+    let _vertices_len = match env.get_array_length(&vertices) {
+        Ok(len) => len,
         Err(err) => {
-            throw_and_return(&mut env, &format!("Failed to get texture by handle: {}", err));
+            throw_and_return(
+                &mut env,
+                &format!("Failed to get vertices array length: {}", err),
+            );
             return;
         }
-    }, atlas_name_str, sprite_map);
+    };
+
+    // Get indices array length
+    let _indices_len = match env.get_array_length(&indices) {
+        Ok(len) => len,
+        Err(err) => {
+            throw_and_return(
+                &mut env,
+                &format!("Failed to get indices array length: {}", err),
+            );
+            return;
+        }
+    };
+
+    // Helper function to get float array data
+    let get_float_array = |env: &mut JNIEnv, array: &JFloatArray, name: &str| -> Option<Vec<f32>> {
+        // Use ReleaseMode::NoCopyBack since we only read the data
+        match unsafe { env.get_array_elements(array, ReleaseMode::NoCopyBack) } {
+            Ok(elements) => {
+                let vec: Vec<f32> = elements.iter().map(|&x| x).collect();
+                Some(vec)
+            }
+            Err(err) => {
+                throw_and_return(
+                    env,
+                    &format!("Failed to get {} array elements: {}", name, err),
+                );
+                None
+            }
+        }
+    };
+
+    // Helper function to get int array data
+    let get_int_array = |env: &mut JNIEnv, array: &JIntArray, name: &str| -> Option<Vec<i32>> {
+        // Use ReleaseMode::NoCopyBack since we only read the data
+        match unsafe { env.get_array_elements(array, ReleaseMode::NoCopyBack) } {
+            Ok(elements) => {
+                let vec: Vec<i32> = elements.iter().map(|&x| x).collect();
+                Some(vec)
+            }
+            Err(err) => {
+                throw_and_return(
+                    env,
+                    &format!("Failed to get {} array elements: {}", name, err),
+                );
+                None
+            }
+        }
+    };
+
+    let vertices_vec = match get_float_array(&mut env, &vertices, "vertices") {
+        Some(vec) => vec,
+        None => return,
+    };
+
+    let indices_vec = match get_int_array(&mut env, &indices, "indices") {
+        Some(vec) => vec,
+        None => return,
+    };
+
+    // Convert vertices to bytes (f32 to u8)
+    let vertices_bytes: Vec<u8> = vertices_vec
+        .iter()
+        .flat_map(|&f| f.to_ne_bytes().to_vec())
+        .collect();
+
+    let index_data: Vec<u32> = indices_vec.iter().map(|&i| i as u32).collect();
+
+    // Create geometry data
+    let geometry_data = crate::geometry::GeometryData::from_triangles(vertices_bytes, index_data);
+
+    // Add to geometry manager for processing
+    renderer.upload_chunk_mesh(chunk_x, chunk_z, geometry_data);
 }
 
 unsafe fn load_context(addr: i64) -> Arc<VkBackend> {

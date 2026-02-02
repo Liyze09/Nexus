@@ -136,7 +136,7 @@ public final class NexusWorldRenderer extends LevelRenderer {
     public void setLevel(@Nullable ClientLevel clientLevel) {
         this.world = clientLevel;
         if (clientLevel != null) {
-            this.builder = new NexusChunkBuilder(clientLevel);
+            this.builder = new NexusChunkBuilder(clientLevel, backend);
             if (!rendering) {
                 this.rendering = true;
             }
