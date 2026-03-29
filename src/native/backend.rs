@@ -56,6 +56,7 @@ use vulkano::sync::semaphore::{
     ExternalSemaphoreHandleType, ExternalSemaphoreHandleTypes, Semaphore, SemaphoreCreateInfo,
 };
 use vulkano::{DeviceSize, NonExhaustive, Version, VulkanLibrary, VulkanObject};
+#[cfg(windows)]
 use windows_sys::Win32::Foundation::CloseHandle;
 use crate::backend::state::RenderStateManager;
 use crate::terrain::BuiltSections;
@@ -143,9 +144,9 @@ impl VkBackend {
                     khr_acceleration_structure: device_properties.ray_trace,
                     khr_ray_tracing_pipeline: device_properties.ray_trace,
                     khr_ray_query: device_properties.ray_trace,
+                    khr_ray_tracing_position_fetch: device_properties.ray_trace,
                     khr_synchronization2: true,
-                    ext_mesh_shader: true,
-                    ext_descriptor_indexing: true,
+                    ext_scalar_block_layout: true,
                     ..Default::default()
                 },
                 enabled_features: DeviceFeatures {
@@ -153,8 +154,6 @@ impl VkBackend {
                     ray_tracing_pipeline: device_properties.ray_trace,
                     ray_query: device_properties.ray_trace,
                     acceleration_structure: device_properties.ray_trace,
-                    mesh_shader: true,
-                    task_shader: true,
                     ..Default::default()
                 },
                 ..Default::default()
