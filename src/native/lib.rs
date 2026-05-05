@@ -52,7 +52,7 @@ impl NativeContext {
         };
         Ok(Self {
             vulkan_backend,
-            wasm_runtime: WasmRuntime::new(extension_folder),
+            wasm_runtime: WasmRuntime::new(extension_folder)?,
             errors: Mutex::new(Vec::new()),
         })
     }
@@ -184,6 +184,38 @@ pub unsafe extern "C" fn ark_initialize_extension(ptr: i64, id: *const std::ffi:
 pub unsafe extern "C" fn ark_initialize_extensions(ptr: i64) -> i32 {
     let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
     match ctx.wasm_runtime.initialize_extensions() {
+        Ok(_) => 0,
+        Err(e) => {
+            ctx.push_error(e);
+            1
+        }
+    }
+}
+
+/// # Safety
+/// `ptr` must be a pointer previously returned by `ark_create_native_context`.
+/// `id` must be a valid C string. Returns 0 on success, 1 on failure.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ark_disable_extension(ptr: i64, id: *const std::ffi::c_char) -> i32 {
+    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+    let id = unsafe { CStr::from_ptr(id) }.to_string_lossy();
+    match ctx.wasm_runtime.disable_extension(&id) {
+        Ok(_) => 0,
+        Err(e) => {
+            ctx.push_error(e);
+            1
+        }
+    }
+}
+
+/// # Safety
+/// `ptr` must be a pointer previously returned by `ark_create_native_context`.
+/// `id` must be a valid C string. Returns 0 on success, 1 on failure.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ark_unload_extension(ptr: i64, id: *const std::ffi::c_char) -> i32 {
+    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+    let id = unsafe { CStr::from_ptr(id) }.to_string_lossy();
+    match ctx.wasm_runtime.unload_extension(&id) {
         Ok(_) => 0,
         Err(e) => {
             ctx.push_error(e);

@@ -1,46 +1,52 @@
 use std::{
-    collections::HashMap,
-    net::{IpAddr, SocketAddr, ToSocketAddrs},
-    path::PathBuf,
-    sync::{Arc, Mutex},
+    collections::HashMap, net::{IpAddr, SocketAddr, ToSocketAddrs}, path::PathBuf, sync::{Arc, Mutex}
 };
 
+use anyhow::anyhow;
 use log::error;
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use wasmtime::{
-    component::{Component, Linker},
-    Engine, Store,
+    Engine, Store, component::{Component, Instance, Linker, TypedFunc}
 };
 use wasmtime_wasi::{DirPerms, FilePerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::extension::package::{parse_package, ExtensionPackage};
+use crate::extension::{functions, package::{ExtensionPackage, parse_package}};
 
 pub struct WasmRuntime {
     pub engine: Engine,
     pub loaded_extensions: LoadedExtensions,
     pub linker: Linker<ExtensionContext>,
+    pub registry: Registry,
     pub extension_folder: String,
 }
 
 type LoadedExtensions =
-    Arc<Mutex<HashMap<String, (Store<ExtensionContext>, wasmtime::component::Instance)>>>;
+    Arc<Mutex<HashMap<String, (Store<ExtensionContext>, Instance)>>>;
+
+type Registry = 
+    Arc<Mutex<HashMap<String, (TypedFunc<(), ()>, String)>>>;
 
 pub struct ExtensionContext {
     pub package: ExtensionPackage,
     pub wasm_component: Component,
     pub wasi_ctx: WasiCtx,
     pub table: ResourceTable,
+    pub instance: Option<Instance>,
+    pub public_registry: Registry,
 }
 
 impl WasmRuntime {
-    pub fn new(extension_folder: String) -> Self {
+    pub fn new(extension_folder: String) -> anyhow::Result<Self> {
         let engine = Engine::default();
-        Self {
-            linker: Linker::new(&engine),
+        let mut linker = Linker::<ExtensionContext>::new(&engine);
+        let mut ark = linker.instance("ark")?;
+        functions::register_host_functions(&mut ark)?;
+        Ok(Self {
+            linker,
             engine,
             loaded_extensions: Arc::new(Mutex::new(HashMap::new())),
+            registry: Arc::new(Mutex::new(HashMap::new())),
             extension_folder,
-        }
+        })
     }
 
     pub fn load_extension(&self, file_name: &str, args: LaunchArgs) -> anyhow::Result<()> {
@@ -61,6 +67,7 @@ impl WasmRuntime {
         let wasm_component = Component::from_binary(&self.engine, wasm_bytes)?;
 
         let mut wasi_builder = WasiCtxBuilder::new();
+        wasi_builder.allow_blocking_current_thread(true);
         let mut network_addrs: Vec<(IpAddr, Option<u16>)> = Vec::new();
 
         for feature_str in &args.enabled_wasi_features {
@@ -97,9 +104,12 @@ impl WasmRuntime {
                 wasm_component: wasm_component.clone(),
                 wasi_ctx: wasi_builder.build(),
                 table: ResourceTable::new(),
+                instance: None,
+                public_registry: self.registry.clone(),
             },
         );
         let instance = self.linker.instantiate(&mut store, &wasm_component)?;
+        store.data_mut().instance = Some(instance);
         let mut loaded_extensions = self.loaded_extensions.lock().unwrap();
         loaded_extensions.insert(store.data().package.manifest.id.clone(), (store, instance));
         Ok(())
@@ -121,7 +131,7 @@ impl WasmRuntime {
         self.loaded_extensions
             .lock()
             .unwrap()
-            .par_iter_mut()
+            .iter_mut()
             .for_each(|(_name, (store, instance))| {
                 let fun_name = store.data().package.manifest.entry_function.clone();
                 if let Some(fun) = instance.get_func(&mut *store, &fun_name) {
@@ -131,6 +141,39 @@ impl WasmRuntime {
                     }
                 };
             });
+        Ok(())
+    }
+
+    pub fn disable_extension(&self, id: &str) -> anyhow::Result<()> {
+        let mut binding = self.loaded_extensions.lock().unwrap();
+        let (store, instance) = binding
+            .get_mut(id)
+            .ok_or(anyhow::anyhow!("Extension not found: {}", id))?;
+        self.disable_inner(store, instance, id)
+    }
+
+    fn disable_inner(
+        &self,
+        store: &mut Store<ExtensionContext>,
+        instance: &mut Instance,
+        id: &str,
+    ) -> anyhow::Result<()> {
+        self.registry.lock().unwrap().retain(|_, (_, ext_id)| ext_id != id);
+        if let Some(close_fn) = &store.data().package.manifest.close_function {
+            let close_fn = close_fn.clone();
+            if let Some(fun) = instance.get_func(&mut *store, close_fn) {
+                fun.call(store, &[], &mut [])?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn unload_extension(&self, id: &str) -> anyhow::Result<()> {
+        let mut binding = self.loaded_extensions.lock().map_err(|err| anyhow!("Failed to lock loaded extensions: {}", err))?;
+        if let Some((store, instance)) = binding.get_mut(id) {
+            self.disable_inner(store, instance, id)?;
+        }
+        binding.remove(id);
         Ok(())
     }
 }
@@ -148,12 +191,6 @@ impl WasiView for ExtensionContext {
             ctx: &mut self.wasi_ctx,
             table: &mut self.table,
         }
-    }
-}
-
-impl Default for WasmRuntime {
-    fn default() -> Self {
-        Self::new(String::new())
     }
 }
 

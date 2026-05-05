@@ -17,6 +17,8 @@ public final class NativeContext {
     private static final MethodHandle LOAD_EXTENSION;
     private static final MethodHandle INITIALIZE_EXTENSION;
     private static final MethodHandle INITIALIZE_EXTENSIONS;
+    private static final MethodHandle DISABLE_EXTENSION;
+    private static final MethodHandle UNLOAD_EXTENSION;
     private static final MethodHandle POP_ERROR;
     private static final MethodHandle ERROR_COUNT;
     private static final MethodHandle FREE_STRING;
@@ -75,6 +77,20 @@ public final class NativeContext {
             INITIALIZE_EXTENSIONS = linker.downcallHandle(
                     initExtsSymbol,
                     FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG)
+            );
+
+            var disableExtSymbol = lookup.find("ark_disable_extension").orElseThrow();
+            DISABLE_EXTENSION = linker.downcallHandle(
+                    disableExtSymbol,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                            ValueLayout.ADDRESS)
+            );
+
+            var unloadExtSymbol = lookup.find("ark_unload_extension").orElseThrow();
+            UNLOAD_EXTENSION = linker.downcallHandle(
+                    unloadExtSymbol,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                            ValueLayout.ADDRESS)
             );
 
             var freeStringSymbol = lookup.find("ark_free_string").orElseThrow();
@@ -220,6 +236,33 @@ public final class NativeContext {
             return rc == 0;
         } catch (Throwable t) {
             Ark.LOGGER.error("Failed to initialize extensions", t);
+            return false;
+        }
+    }
+
+    /// Disables an extension: runs its close function and removes its hooks.
+    /// The extension remains loaded but inactive.
+    /// @return true on success
+    public boolean disableExtension(@NonNull String id) {
+        try (var arena = Arena.ofConfined()) {
+            var idSeg = arena.allocateFrom(id);
+            int rc = (int) DISABLE_EXTENSION.invokeExact(this.address, idSeg);
+            return rc == 0;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to disable extension '{}'", id, t);
+            return false;
+        }
+    }
+
+    /// Unloads an extension: disables it and removes it from memory.
+    /// @return true on success
+    public boolean unloadExtension(@NonNull String id) {
+        try (var arena = Arena.ofConfined()) {
+            var idSeg = arena.allocateFrom(id);
+            int rc = (int) UNLOAD_EXTENSION.invokeExact(this.address, idSeg);
+            return rc == 0;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to unload extension '{}'", id, t);
             return false;
         }
     }

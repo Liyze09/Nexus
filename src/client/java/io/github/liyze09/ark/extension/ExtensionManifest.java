@@ -17,6 +17,7 @@ public class ExtensionManifest {
     public String namespaces = "ark:unnamed";
     public String entrypoint = "script";
     public String entry_function = "initialize";
+    public String close_function;
     public RuntimeArgs runtime = new RuntimeArgs();
     public String name;
     public String version = "";

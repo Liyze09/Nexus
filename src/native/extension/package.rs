@@ -51,6 +51,7 @@ pub struct ExtensionManifest {
     pub entrypoint: String,
     #[serde(default = "default_entry_function")]
     pub entry_function: String,
+    pub close_function: Option<String>,
     #[serde(default)]
     pub runtime: RuntimeArgs,
     pub name: Option<String>,
