@@ -45,6 +45,8 @@ public class Ark implements ClientModInitializer {
                 transferQueue, graphicsQueue, computeQueue,
                 ExtensionLoader.extensionPath
         );
+        nativeContext.setEnabledVulkanExtensions(getExtensionLoader().getCurrentlyEnabledExtensions());
+        nativeContext.setEnabledVulkanFeatures(getExtensionLoader().getCurrentlyEnabledFeatures());
 
         LOGGER.info("Native context created: 0x{}", nativeContext);
     }

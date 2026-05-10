@@ -148,11 +148,19 @@ public class ExtensionLoader {
         }
     }
 
-    public Set<String> getNeededVulkanExtensions() {
-        return Collections.unmodifiableSet(neededVulkanExtensions);
+    public List<String> getNeededVulkanExtensions() {
+        return neededVulkanExtensions.stream().toList();
     }
 
-    public Set<VulkanFeature> getNeededVulkanFeatures() {
-        return Collections.unmodifiableSet(neededVulkanFeatures);
+    public List<VulkanFeature> getNeededVulkanFeatures() {
+        return neededVulkanFeatures.stream().toList();
+    }
+
+    public List<String> getCurrentlyEnabledExtensions() {
+        return currentlyEnabledExtensions.stream().toList();
+    }
+
+    public List<String> getCurrentlyEnabledFeatures() {
+        return currentlyEnabledFeatures.stream().toList();
     }
 }

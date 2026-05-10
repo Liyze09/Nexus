@@ -24,7 +24,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 pub struct NativeContext {
     pub vulkan_backend: VkBackend,
     pub wasm_runtime: WasmRuntime,
-    errors: Mutex<Vec<anyhow::Error>>,
+    pub errors: Mutex<Vec<anyhow::Error>>,
 }
 
 impl NativeContext {
@@ -51,8 +51,8 @@ impl NativeContext {
             compute_queue,
         };
         Ok(Self {
+            wasm_runtime: WasmRuntime::new(extension_folder, vulkan_backend.clone())?,
             vulkan_backend,
-            wasm_runtime: WasmRuntime::new(extension_folder)?,
             errors: Mutex::new(Vec::new()),
         })
     }
@@ -256,5 +256,77 @@ pub unsafe extern "C" fn ark_error_count(ptr: i64) -> i32 {
 pub unsafe extern "C" fn ark_free_string(ptr: *mut std::ffi::c_char) {
     if !ptr.is_null() {
         drop(unsafe { CString::from_raw(ptr) });
+    }
+}
+
+/// # Safety
+/// `ptr` must be a valid pointer returned by `ark_create_native_context`.
+/// `json` must be a valid C string containing a JSON array of feature names,
+/// e.g. `["timelineSemaphore","hostQueryReset"]`, or null to clear the set.
+/// Returns 0 on success, 1 on failure (use `ark_pop_error`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ark_set_enabled_vulkan_features(
+    ptr: i64,
+    json: *const std::ffi::c_char,
+) -> i32 {
+    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+    let features: Vec<String> = if json.is_null() {
+        Vec::new()
+    } else {
+        let json_str = unsafe { CStr::from_ptr(json) }.to_string_lossy();
+        match serde_json::from_str(&json_str) {
+            Ok(v) => v,
+            Err(e) => {
+                ctx.push_error(anyhow::anyhow!("Failed to parse enabled vulkan features JSON: {e}"));
+                return 1;
+            }
+        }
+    };
+    match ctx.wasm_runtime.enabled_vulkan_features.lock() {
+        Ok(mut set) => {
+            set.clear();
+            set.extend(features);
+            0
+        }
+        Err(e) => {
+            ctx.push_error(anyhow::anyhow!("Failed to lock enabled_vulkan_features: {e}"));
+            1
+        }
+    }
+}
+
+/// # Safety
+/// `ptr` must be a valid pointer returned by `ark_create_native_context`.
+/// `json` must be a valid C string containing a JSON array of extension names,
+/// e.g. `["VK_KHR_swapchain","VK_EXT_descriptor_indexing"]`, or null to clear the set.
+/// Returns 0 on success, 1 on failure (use `ark_pop_error`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ark_set_enabled_vulkan_extensions(
+    ptr: i64,
+    json: *const std::ffi::c_char,
+) -> i32 {
+    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+    let extensions: Vec<String> = if json.is_null() {
+        Vec::new()
+    } else {
+        let json_str = unsafe { CStr::from_ptr(json) }.to_string_lossy();
+        match serde_json::from_str(&json_str) {
+            Ok(v) => v,
+            Err(e) => {
+                ctx.push_error(anyhow::anyhow!("Failed to parse enabled vulkan extensions JSON: {e}"));
+                return 1;
+            }
+        }
+    };
+    match ctx.wasm_runtime.enabled_vulkan_extensions.lock() {
+        Ok(mut set) => {
+            set.clear();
+            set.extend(extensions);
+            0
+        }
+        Err(e) => {
+            ctx.push_error(anyhow::anyhow!("Failed to lock enabled_vulkan_extensions: {e}"));
+            1
+        }
     }
 }

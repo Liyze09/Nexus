@@ -1,6 +1,7 @@
 use vulkanalia::{vk, Entry};
 use vulkanalia_vma::vma::VmaAllocator;
 
+#[derive(Debug, Clone)]
 pub struct VkBackend {
     pub entry: Entry,
     pub instance: vk::Instance,

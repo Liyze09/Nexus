@@ -1,0 +1,24 @@
+package ark:core@0.1.0;
+interface logging {
+    trace: func(message: string);
+    debug: func(message: string);
+    info: func(message: string);
+    warn: func(message: string);
+    error: func(message: string);
+    log: func(level: level, message: string);
+    is-enabled: func(level: level) -> bool;
+    enum level {
+        trace,
+        debug,
+        info,
+        warn,
+        error
+    }
+}
+
+world core {
+    import register: func(trigger: string, function: string) -> result<_, string>;
+    import check-vulkan-feature: func(feature: string) -> bool;
+    import check-vulkan-extension: func(extension: string) -> bool;
+    import logging;
+}

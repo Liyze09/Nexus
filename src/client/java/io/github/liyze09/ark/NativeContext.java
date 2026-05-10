@@ -21,6 +21,8 @@ public final class NativeContext {
     private static final MethodHandle UNLOAD_EXTENSION;
     private static final MethodHandle POP_ERROR;
     private static final MethodHandle ERROR_COUNT;
+    private static final MethodHandle SET_ENABLED_VULKAN_FEATURES;
+    private static final MethodHandle SET_ENABLED_VULKAN_EXTENSIONS;
     private static final MethodHandle FREE_STRING;
 
     static {
@@ -89,6 +91,20 @@ public final class NativeContext {
             var unloadExtSymbol = lookup.find("ark_unload_extension").orElseThrow();
             UNLOAD_EXTENSION = linker.downcallHandle(
                     unloadExtSymbol,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                            ValueLayout.ADDRESS)
+            );
+
+            var setFeaturesSymbol = lookup.find("ark_set_enabled_vulkan_features").orElseThrow();
+            SET_ENABLED_VULKAN_FEATURES = linker.downcallHandle(
+                    setFeaturesSymbol,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
+                            ValueLayout.ADDRESS)
+            );
+
+            var setExtsSymbol = lookup.find("ark_set_enabled_vulkan_extensions").orElseThrow();
+            SET_ENABLED_VULKAN_EXTENSIONS = linker.downcallHandle(
+                    setExtsSymbol,
                     FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG,
                             ValueLayout.ADDRESS)
             );
@@ -263,6 +279,36 @@ public final class NativeContext {
             return rc == 0;
         } catch (Throwable t) {
             Ark.LOGGER.error("Failed to unload extension '{}'", id, t);
+            return false;
+        }
+    }
+
+    /// Sets the enabled Vulkan feature names on the native side, as a JSON array.
+    /// This populates the sets queried by WASM extensions via check_vulkan_feature().
+    /// @return true on success
+    public boolean setEnabledVulkanFeatures(@Nullable List<String> features) {
+        try (var arena = Arena.ofConfined()) {
+            var jsonStr = toJsonArray(features);
+            var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
+            int rc = (int) SET_ENABLED_VULKAN_FEATURES.invokeExact(this.address, jsonSeg);
+            return rc == 0;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to set enabled vulkan features", t);
+            return false;
+        }
+    }
+
+    /// Sets the enabled Vulkan extension names on the native side, as a JSON array.
+    /// This populates the sets queried by WASM extensions via check_vulkan_extension().
+    /// @return true on success
+    public boolean setEnabledVulkanExtensions(@Nullable List<String> extensions) {
+        try (var arena = Arena.ofConfined()) {
+            var jsonStr = toJsonArray(extensions);
+            var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
+            int rc = (int) SET_ENABLED_VULKAN_EXTENSIONS.invokeExact(this.address, jsonSeg);
+            return rc == 0;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to set enabled vulkan extensions", t);
             return false;
         }
     }

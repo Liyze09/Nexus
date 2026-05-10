@@ -1,15 +1,27 @@
 use std::{
-    collections::HashMap, net::{IpAddr, SocketAddr, ToSocketAddrs}, path::PathBuf, sync::{Arc, Mutex}
+    collections::{HashMap, HashSet},
+    net::{IpAddr, SocketAddr, ToSocketAddrs},
+    path::{self, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 use anyhow::anyhow;
 use log::error;
 use wasmtime::{
-    Engine, Store, component::{Component, Instance, Linker, TypedFunc}
+    Cache, CacheConfig, Config, Engine, Store,
+    component::{Component, HasData, Instance, Linker, TypedFunc},
 };
-use wasmtime_wasi::{DirPerms, FilePerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{
+    DirPerms, FilePerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView,
+};
 
-use crate::extension::{functions, package::{ExtensionPackage, parse_package}};
+use crate::{
+    extension::{
+        binding,
+        package::{ExtensionPackage, parse_package},
+    },
+    vulkan::VkBackend,
+};
 
 pub struct WasmRuntime {
     pub engine: Engine,
@@ -17,13 +29,16 @@ pub struct WasmRuntime {
     pub linker: Linker<ExtensionContext>,
     pub registry: Registry,
     pub extension_folder: String,
+    pub vulkan: VkBackend,
+    pub enabled_vulkan_features: Arc<Mutex<HashSet<String>>>,
+    pub enabled_vulkan_extensions: Arc<Mutex<HashSet<String>>>,
 }
 
-type LoadedExtensions =
-    Arc<Mutex<HashMap<String, (Store<ExtensionContext>, Instance)>>>;
+type LoadedExtensions = Arc<Mutex<HashMap<String, (Store<ExtensionContext>, Instance)>>>;
 
-type Registry = 
-    Arc<Mutex<HashMap<String, (TypedFunc<(), ()>, String)>>>;
+type Registry = Arc<Mutex<HashMap<String, (TypedFunc<(), ()>, String)>>>;
+
+static CACHE_PATH: &str = "./cache/ark/";
 
 pub struct ExtensionContext {
     pub package: ExtensionPackage,
@@ -32,20 +47,37 @@ pub struct ExtensionContext {
     pub table: ResourceTable,
     pub instance: Option<Instance>,
     pub public_registry: Registry,
+    pub enabled_vulkan_features: Arc<Mutex<HashSet<String>>>,
+    pub enabled_vulkan_extensions: Arc<Mutex<HashSet<String>>>,
+}
+
+impl HasData for ExtensionContext {
+    type Data<'a> = &'a mut ExtensionContext;
 }
 
 impl WasmRuntime {
-    pub fn new(extension_folder: String) -> anyhow::Result<Self> {
-        let engine = Engine::default();
+    pub fn new(extension_folder: String, vulkan: VkBackend) -> anyhow::Result<Self> {
+        let mut config = Config::new();
+
+        let cache_file = path::absolute(CACHE_PATH)?;
+        let mut cache_config = CacheConfig::new();
+        cache_config.with_directory(cache_file);
+        let cache = Cache::new(cache_config)?;
+        config.cache(Some(cache));
+
+        let engine = Engine::new(&config)?;
         let mut linker = Linker::<ExtensionContext>::new(&engine);
-        let mut ark = linker.instance("ark")?;
-        functions::register_host_functions(&mut ark)?;
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
+        binding::add_to_linker(&mut linker)?;
         Ok(Self {
             linker,
             engine,
             loaded_extensions: Arc::new(Mutex::new(HashMap::new())),
             registry: Arc::new(Mutex::new(HashMap::new())),
             extension_folder,
+            vulkan,
+            enabled_vulkan_features: Arc::new(Mutex::new(HashSet::new())),
+            enabled_vulkan_extensions: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -72,7 +104,10 @@ impl WasmRuntime {
 
         for feature_str in &args.enabled_wasi_features {
             match parse_wasi_feature(feature_str)? {
-                WasiFeature::Filesystem { host_path, guest_path } => {
+                WasiFeature::Filesystem {
+                    host_path,
+                    guest_path,
+                } => {
                     wasi_builder.preopened_dir(
                         &host_path,
                         &guest_path,
@@ -81,7 +116,9 @@ impl WasmRuntime {
                     )?;
                 }
                 WasiFeature::Network { addrs } => network_addrs.extend(addrs),
-                WasiFeature::IpNameLookup => { wasi_builder.allow_ip_name_lookup(true); }
+                WasiFeature::IpNameLookup => {
+                    wasi_builder.allow_ip_name_lookup(true);
+                }
             }
         }
 
@@ -90,9 +127,9 @@ impl WasmRuntime {
             wasi_builder.socket_addr_check(move |addr, _use| {
                 let allowed = Arc::clone(&allowed);
                 Box::pin(async move {
-                    allowed.iter().any(|(ip, port)| {
-                        *ip == addr.ip() && port.is_none_or(|p| p == addr.port())
-                    })
+                    allowed
+                        .iter()
+                        .any(|(ip, port)| *ip == addr.ip() && port.is_none_or(|p| p == addr.port()))
                 })
             });
         }
@@ -106,6 +143,8 @@ impl WasmRuntime {
                 table: ResourceTable::new(),
                 instance: None,
                 public_registry: self.registry.clone(),
+                enabled_vulkan_features: self.enabled_vulkan_features.clone(),
+                enabled_vulkan_extensions: self.enabled_vulkan_extensions.clone(),
             },
         );
         let instance = self.linker.instantiate(&mut store, &wasm_component)?;
@@ -158,7 +197,10 @@ impl WasmRuntime {
         instance: &mut Instance,
         id: &str,
     ) -> anyhow::Result<()> {
-        self.registry.lock().unwrap().retain(|_, (_, ext_id)| ext_id != id);
+        self.registry
+            .lock()
+            .unwrap()
+            .retain(|_, (_, ext_id)| ext_id != id);
         if let Some(close_fn) = &store.data().package.manifest.close_function {
             let close_fn = close_fn.clone();
             if let Some(fun) = instance.get_func(&mut *store, close_fn) {
@@ -169,7 +211,10 @@ impl WasmRuntime {
     }
 
     pub fn unload_extension(&self, id: &str) -> anyhow::Result<()> {
-        let mut binding = self.loaded_extensions.lock().map_err(|err| anyhow!("Failed to lock loaded extensions: {}", err))?;
+        let mut binding = self
+            .loaded_extensions
+            .lock()
+            .map_err(|err| anyhow!("Failed to lock loaded extensions: {}", err))?;
         if let Some((store, instance)) = binding.get_mut(id) {
             self.disable_inner(store, instance, id)?;
         }
@@ -195,8 +240,13 @@ impl WasiView for ExtensionContext {
 }
 
 enum WasiFeature {
-    Filesystem { host_path: String, guest_path: String },
-    Network { addrs: Vec<(IpAddr, Option<u16>)> },
+    Filesystem {
+        host_path: String,
+        guest_path: String,
+    },
+    Network {
+        addrs: Vec<(IpAddr, Option<u16>)>,
+    },
     IpNameLookup,
 }
 
@@ -228,10 +278,15 @@ fn parse_wasi_feature(s: &str) -> anyhow::Result<WasiFeature> {
             ));
         }
 
-        Ok(WasiFeature::Filesystem { host_path, guest_path })
+        Ok(WasiFeature::Filesystem {
+            host_path,
+            guest_path,
+        })
     } else if let Some(addr_str) = s.strip_prefix("net:") {
         if addr_str.is_empty() {
-            return Err(anyhow::anyhow!("Unconditional network access is not allowed"));
+            return Err(anyhow::anyhow!(
+                "Unconditional network access is not allowed"
+            ));
         }
         let (host, port) = if let Some((h, p)) = addr_str.rsplit_once(':') {
             if let Ok(port) = p.parse::<u16>() {
@@ -249,7 +304,10 @@ fn parse_wasi_feature(s: &str) -> anyhow::Result<WasiFeature> {
         };
         let sock_addrs: Vec<SocketAddr> = resolve_str.to_socket_addrs()?.collect();
         if sock_addrs.is_empty() {
-            return Err(anyhow::anyhow!("Failed to resolve network address: {}", host));
+            return Err(anyhow::anyhow!(
+                "Failed to resolve network address: {}",
+                host
+            ));
         }
         let addrs = sock_addrs.into_iter().map(|a| (a.ip(), port)).collect();
         Ok(WasiFeature::Network { addrs })
